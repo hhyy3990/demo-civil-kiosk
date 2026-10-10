@@ -1,0 +1,1 @@
+- [Kiosk scope](kiosk-scope.md) — keep the current public-service kiosk demo focused on certificate issuance, with integration concepts deferred.
