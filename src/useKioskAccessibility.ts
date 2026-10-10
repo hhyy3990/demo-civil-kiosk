@@ -93,6 +93,42 @@ const guideByStep: Record<KioskStep, { title: string; text: string; actionId: st
   },
 };
 
+type LayoutCorrections = ReturnType<AccessibilitySdk['getLastLayoutCorrections']>;
+
+const correctionStrategies: Record<string, readonly string[]> = {
+  'text-clipped': ['text-wrap'],
+  'horizontal-overflow': ['release-container-width', 'reduce-grid-columns'],
+  'bottom-control-obscures-action': ['reserve-scroll-space'],
+  'action-overlap': ['release-container-width', 'reduce-grid-columns', 'stack-action-group'],
+};
+
+function recordLayoutCheck(
+  sdk: AccessibilitySdk,
+  root: HTMLElement,
+  automaticCorrections: LayoutCorrections,
+) {
+  let diagnostics = sdk.inspectLayout();
+  const attemptedStrategies = new Set<string>(automaticCorrections.map(({ strategy }) => strategy));
+  const needsOneBoundedCorrection = diagnostics.some((issue) =>
+    (correctionStrategies[issue.issueType] ?? []).some((strategy) => !attemptedStrategies.has(strategy)),
+  );
+  let explicitCorrections: LayoutCorrections = [];
+
+  if (needsOneBoundedCorrection) {
+    explicitCorrections = sdk.correctLayout();
+    diagnostics = sdk.inspectLayout();
+  }
+
+  root.dataset.a11yDiagnostics = JSON.stringify(diagnostics);
+  root.dataset.a11yLayoutCorrections = JSON.stringify({
+    screenId: `civil.${root.querySelector<HTMLElement>('[data-screen]')?.dataset.screen ?? 'main-menu'}`,
+    viewport: { width: window.innerWidth, height: window.innerHeight },
+    automatic: automaticCorrections,
+    explicit: explicitCorrections,
+    last: sdk.getLastLayoutCorrections(),
+  });
+}
+
 export function useKioskAccessibility({
   rootRef,
   step,
@@ -154,16 +190,22 @@ export function useKioskAccessibility({
         };
       }),
       getTextTargets: () => Array.from(root.querySelectorAll<HTMLElement>(
-        '.screen-content h1, .screen-content h2, .screen-content .eyebrow, .screen-content .note-box, .screen-content .screen-footnote, .screen-content .demo-banner, .qr-setup-dialog h2, .qr-setup-dialog [role="status"]',
-      )).map((element, index) => ({
-        id: `civil.${stateRef.current.step}.text-${index + 1}`,
-        element,
-      })),
+        '.screen-content h1, .screen-content h2, .screen-content .eyebrow, .screen-content .note-box, .screen-content .screen-footnote, .screen-content .demo-banner, .screen-content .category-name, .qr-setup-dialog h2, .qr-setup-dialog [role="status"]',
+      )).map((element, index) => {
+        const actionId = element.closest<HTMLElement>('[data-a11y-action-id]')?.dataset.a11yActionId;
+        return {
+          id: actionId ? `${actionId}.label` : `civil.${stateRef.current.step}.text-${index + 1}`,
+          element,
+        };
+      }),
       getLayoutRegions: () => ({
         bottomControls: [root.querySelector<HTMLElement>('[data-a11y-slot="bottom-controls"]')].filter(
           (element): element is HTMLElement => Boolean(element),
         ),
         scrollArea: root.querySelector<HTMLElement>('[data-a11y-slot="scroll-content"]'),
+        reflowContainers: Array.from(root.querySelectorAll<HTMLElement>('[data-a11y-reflow]')),
+        gridContainers: Array.from(root.querySelectorAll<HTMLElement>('[data-a11y-grid]')),
+        actionGroups: Array.from(root.querySelectorAll<HTMLElement>('[data-a11y-action-group]')),
       }),
     };
 
@@ -175,11 +217,38 @@ export function useKioskAccessibility({
       },
     });
     sdkRef.current = sdk;
-    sdk.applyProfile(profileRef.current);
+
+    let resizeFrame: number | null = null;
+    let lastViewport = `${window.innerWidth}x${window.innerHeight}`;
+    const handleResize = () => {
+      if (resizeFrame !== null) return;
+      resizeFrame = window.requestAnimationFrame(() => {
+        resizeFrame = null;
+        const viewport = `${window.innerWidth}x${window.innerHeight}`;
+        if (viewport === lastViewport) return;
+        lastViewport = viewport;
+
+        const currentSdk = sdkRef.current;
+        if (!currentSdk) return;
+        const currentProfile = profileRef.current;
+        currentSdk.applyProfile(currentProfile);
+        const automaticCorrections =
+          currentProfile.textSize !== 'standard' ||
+          currentProfile.buttonSize === 'large' ||
+          currentProfile.bottomControls
+            ? currentSdk.getLastLayoutCorrections()
+            : [];
+        recordLayoutCheck(currentSdk, root, automaticCorrections);
+      });
+    };
+    window.addEventListener('resize', handleResize, { passive: true });
 
     return () => {
+      window.removeEventListener('resize', handleResize);
+      if (resizeFrame !== null) window.cancelAnimationFrame(resizeFrame);
       sdk.destroy();
       delete root.dataset.a11yDiagnostics;
+      delete root.dataset.a11yLayoutCorrections;
       sdkRef.current = null;
     };
   }, [rootRef]);
@@ -190,6 +259,20 @@ export function useKioskAccessibility({
     if (!sdk || !root) return;
 
     sdk.applyProfile(profile);
+    const automaticCorrections =
+      profile.textSize !== 'standard' ||
+      profile.buttonSize === 'large' ||
+      profile.bottomControls
+        ? sdk.getLastLayoutCorrections()
+        : [];
+    recordLayoutCheck(sdk, root, automaticCorrections);
+  }, [profile, rootRef, step]);
+
+  useEffect(() => {
+    const sdk = sdkRef.current;
+    const root = rootRef.current;
+    if (!sdk || !root) return;
+
     const guide = guideByStep[step];
     const paused = qrModalOpen || noticeOpen;
     sdk.setGuideState({

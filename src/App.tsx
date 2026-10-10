@@ -105,7 +105,6 @@ function App() {
   ), []);
   const applyAccessibilityProfile = useCallback((profile: AccessibilityProfile) => {
     setAccessibilityProfile(profile);
-    accessibilitySdkRef.current?.applyProfile(profile);
     setNotice('내 방식 QR의 접근성 설정을 적용했습니다.');
   }, [accessibilitySdkRef]);
 
@@ -121,7 +120,7 @@ function App() {
           </header>
           {step !== 'main-menu' && <div className="progress-rail" aria-label={`진행 단계 ${stepNames[step]}`}><div style={{ width: `${Math.min(100, (steps.indexOf(step) / 9) * 100)}%` }} /></div>}
 
-          <div className="screen-content" key={step} data-screen={step} data-a11y-slot="scroll-content">
+          <div className="screen-content" key={step} data-screen={step} data-a11y-slot="scroll-content" data-a11y-reflow>
             {step === 'main-menu' && <MainMenuScreen onSelectCategory={selectCategory} onOpenAccessibility={openQrModal}/>}
             {step === 'resident-type' && <ResidentTypeScreen onSelectCopy={() => setStep('resident-number')} onUnavailable={() => setNotice('주민등록표(초본)은 현재 준비 중입니다. 데모에서는 등본 발급을 이용해 주십시오.')}/>}
             {step === 'resident-number' && <ResidentNumberScreen residentNumber={residentNumber} onDigit={addDigit} onClear={() => setResidentNumber('')} onCorrect={() => setResidentNumber((old) => old.slice(0, -1))}/>}
@@ -136,7 +135,7 @@ function App() {
 
           <footer className="device-footer" data-a11y-slot="bottom-controls">
             <div className="footer-service"><span className="footer-led" /> 민원 발급 시뮬레이션 <span className="footer-separator"/> 실제 신청 정보는 저장되지 않습니다</div>
-            <div className="footer-controls">
+            <div className="footer-controls" data-a11y-action-group>
               <button id="home-button" data-a11y-action-id="civil.navigation.home" className="control-button home-control" onClick={reset}><Home size={18}/><span>처음화면</span></button>
               <button id="back-button" data-a11y-action-id="civil.navigation.back" className="control-button back-control" onClick={moveBack} disabled={step === 'main-menu' || step === 'printing' || step === 'complete'}><ArrowLeft size={18}/><span>전화면</span></button>
               {(step === 'resident-number' || step === 'copies') && <button id="next-confirm-button" data-a11y-action-id={step === 'resident-number' ? 'civil.resident-number.confirm' : 'civil.copies.confirm'} className="control-button confirm-control" onClick={confirm}><Check size={19}/><span>확인</span></button>}
