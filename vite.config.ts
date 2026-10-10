@@ -90,14 +90,13 @@ function qrProfileRelay() {
       }
 
       const result: unknown = await upstream.json().catch(() => null);
-      const profile = isRecord(result)
-        ? result.preferences
-          ?? (isRecord(result.profile) ? result.profile.preferences : undefined)
-          ?? (isRecord(result.data) ? result.data.preferences : undefined)
-        : undefined;
-      if (!isRecord(profile)) return sendJson(response, 502, { error: 'PROFILE_LOOKUP_FAILED' });
+      if (!isRecord(result)) return sendJson(response, 502, { error: 'PROFILE_LOOKUP_FAILED' });
 
-      return sendJson(response, 200, { preferences: profile });
+      return sendJson(response, 200, {
+        schemaVersion: result.schemaVersion,
+        preferences: result.preferences,
+        updatedAt: result.updatedAt,
+      });
     } catch {
       return sendJson(response, controller.signal.aborted ? 504 : 502, { error: 'PROFILE_LOOKUP_FAILED' });
     } finally {

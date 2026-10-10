@@ -93,6 +93,14 @@ const guideByStep: Record<KioskStep, { title: string; text: string; actionId: st
   },
 };
 
+const primaryActionIdsByStep: Partial<Record<KioskStep, readonly string[]>> = {
+  'resident-type': ['resident-register-copy-button'],
+  fingerprint: ['fingerprint-confirm-button'],
+  'fee-waiver': ['fee-waiver-yes-button', 'fee-waiver-no-button'],
+  payment: ['payment-card-button', 'payment-cash-button'],
+  complete: ['complete-home-button'],
+};
+
 type LayoutCorrections = ReturnType<AccessibilitySdk['getLastLayoutCorrections']>;
 
 const correctionStrategies: Record<string, readonly string[]> = {
@@ -157,6 +165,7 @@ export function useKioskAccessibility({
   useEffect(() => {
     const root = rootRef.current;
     if (!root) return;
+    const sdkRoot = root.ownerDocument.documentElement;
 
     const adapter: AccessibilityAdapter = {
       getSnapshot: () => {
@@ -190,27 +199,68 @@ export function useKioskAccessibility({
         };
       }),
       getTextTargets: () => Array.from(root.querySelectorAll<HTMLElement>(
-        '.screen-content h1, .screen-content h2, .screen-content .eyebrow, .screen-content .note-box, .screen-content .screen-footnote, .screen-content .demo-banner, .screen-content .category-name, .qr-setup-dialog h2, .qr-setup-dialog [role="status"]',
+        [
+          '.screen-content h1',
+          '.screen-content h2',
+          '.screen-content .eyebrow',
+          '.screen-content .note-box',
+          '.screen-content .screen-footnote',
+          '.screen-content .demo-banner',
+          '.screen-content .category-name',
+          '.screen-content [data-a11y-detail]',
+          '.screen-content .page-title > p',
+          '.screen-content .toggle-text > strong',
+          '.screen-content .toggle-choice',
+          '.screen-content .selection-caption > span',
+          '.screen-content .selection-caption > strong',
+          '.screen-content .select-card > strong',
+          '.screen-content .select-action',
+          '.qr-setup-dialog h2',
+          '.qr-setup-dialog [role="status"]',
+        ].join(', '),
       )).map((element, index) => {
         const actionId = element.closest<HTMLElement>('[data-a11y-action-id]')?.dataset.a11yActionId;
+        const targetPart = element.hasAttribute('data-a11y-detail')
+          ? 'detail'
+          : element.matches('.toggle-text > strong, .select-card > strong, .category-name')
+            ? 'label'
+            : element.matches('.toggle-choice, .select-action')
+              ? 'state'
+            : `text-${index + 1}`;
         return {
-          id: actionId ? `${actionId}.label` : `civil.${stateRef.current.step}.text-${index + 1}`,
+          id: actionId
+            ? `${actionId}.${targetPart}`
+            : `civil.${stateRef.current.step}.${targetPart}`,
           element,
         };
       }),
-      getLayoutRegions: () => ({
-        bottomControls: [root.querySelector<HTMLElement>('[data-a11y-slot="bottom-controls"]')].filter(
-          (element): element is HTMLElement => Boolean(element),
-        ),
-        scrollArea: root.querySelector<HTMLElement>('[data-a11y-slot="scroll-content"]'),
-        reflowContainers: Array.from(root.querySelectorAll<HTMLElement>('[data-a11y-reflow]')),
-        gridContainers: Array.from(root.querySelectorAll<HTMLElement>('[data-a11y-grid]')),
-        actionGroups: Array.from(root.querySelectorAll<HTMLElement>('[data-a11y-action-group]')),
-      }),
+      getLayoutRegions: () => {
+        const regions = {
+          bottomControls: [root.querySelector<HTMLElement>('[data-a11y-slot="bottom-controls"]')].filter(
+            (element): element is HTMLElement => Boolean(element),
+          ),
+          scrollArea: root.ownerDocument.scrollingElement as HTMLElement | null,
+          reflowContainers: Array.from(root.querySelectorAll<HTMLElement>('[data-a11y-reflow]')),
+          gridContainers: Array.from(root.querySelectorAll<HTMLElement>('[data-a11y-grid]')),
+          actionGroups: Array.from(root.querySelectorAll<HTMLElement>('[data-a11y-action-group]')),
+          guidanceAvoidAreas: [root.querySelector<HTMLElement>('.screen-header')].filter(
+            (element): element is HTMLElement => Boolean(element),
+          ),
+          primaryActions: (primaryActionIdsByStep[stateRef.current.step] ?? [])
+            .map((id) => root.querySelector<HTMLElement>(`#${id}`))
+            .filter((element): element is HTMLElement => Boolean(element))
+            .map((element) => ({ element })),
+        };
+        if (stateRef.current.step !== 'main-menu') return regions;
+        return {
+          ...regions,
+          menuItems: Array.from(root.querySelectorAll<HTMLElement>('[data-a11y-menu-item]')),
+        };
+      },
     };
 
     const sdk = createAccessibilitySdk({
-      root,
+      root: sdkRoot,
       adapter,
       onDiagnostics: (issues) => {
         root.dataset.a11yDiagnostics = JSON.stringify(issues);

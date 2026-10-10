@@ -29,7 +29,7 @@ export function MainMenuScreen({ onSelectCategory, onOpenAccessibility }: { onSe
       </div>
       <div className="demo-banner"><span className="demo-tag">데모 버전 안내</span><span>현재 주민등록등본 발급 기능만 제공됩니다.</span></div>
       <div className="certificate-grid" aria-label="증명서 종류" data-a11y-grid>
-        {certificateCategories.map((category, index) => <button key={category} id={index === 0 ? 'main-resident-button' : `certificate-category-${index + 1}`} data-a11y-action-id={`civil.certificate.${String(index + 1).padStart(2, '0')}`} className={`category-button ${index === 0 ? 'category-active' : ''}`} onClick={() => onSelectCategory(category)}>
+        {certificateCategories.map((category, index) => <button key={category} id={index === 0 ? 'main-resident-button' : `certificate-category-${index + 1}`} data-a11y-action-id={`civil.certificate.${String(index + 1).padStart(2, '0')}`} data-a11y-menu-item className={`category-button ${index === 0 ? 'category-active' : ''}`} onClick={() => onSelectCategory(category)}>
           <span className="category-number">{String(index + 1).padStart(2, '0')}</span><span className="category-name">{category}</span><ChevronRight size={16} className="category-arrow" />
         </button>)}
       </div>
