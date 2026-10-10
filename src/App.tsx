@@ -41,10 +41,6 @@ function App() {
   const [qrModalOpen, setQrModalOpen] = useState(false);
   const [accessibilityProfile, setAccessibilityProfile] = useState<AccessibilityProfile>({ ...DEFAULT_ACCESSIBILITY_PROFILE });
 
-  const reset = () => {
-    setStep('main-menu'); setResidentNumber(''); setOptions({ address: true, history: false, household: false });
-    setFeeExempt(false); setCopies(1); setPrintingProgress(false); setNotice('');
-  };
   const moveBack = () => {
     if (step === 'main-menu') return;
     const index = steps.indexOf(step);
@@ -92,8 +88,21 @@ function App() {
     noticeOpen: Boolean(notice),
     profile: accessibilityProfile,
   });
+  const reset = () => {
+    setStep('main-menu'); setResidentNumber(''); setOptions({ address: true, history: false, household: false });
+    setFeeExempt(false); setCopies(1); setPrintingProgress(false); setNotice('');
+    setQrModalOpen(false);
+    setAccessibilityProfile({ ...DEFAULT_ACCESSIBILITY_PROFILE });
+    accessibilitySdkRef.current?.endSession();
+  };
   const openQrModal = useCallback(() => setQrModalOpen(true), []);
   const closeQrModal = useCallback(() => setQrModalOpen(false), []);
+  const registerSessionCleanup = useCallback((cleanup: () => void) => (
+    accessibilitySdkRef.current?.registerSessionCleanup(cleanup) ?? (() => undefined)
+  ), []);
+  const createSessionGuard = useCallback(() => (
+    accessibilitySdkRef.current?.createSessionGuard() ?? (() => true)
+  ), []);
   const applyAccessibilityProfile = useCallback((profile: AccessibilityProfile) => {
     setAccessibilityProfile(profile);
     accessibilitySdkRef.current?.applyProfile(profile);
@@ -138,7 +147,12 @@ function App() {
         <div className="machine-bottom"><span className="machine-grille"/><span className="machine-bottom-text">민원서류 발급부</span><span className="machine-power"><i/> 전원</span></div>
       </section>
       <div className="page-caption">민원서류 발급 시뮬레이션 <span>·</span> 주민등록표(등본)</div>
-      {qrModalOpen && <QrSetupModal onClose={closeQrModal} onApplyProfile={applyAccessibilityProfile}/>}
+      {qrModalOpen && <QrSetupModal
+        onClose={closeQrModal}
+        onApplyProfile={applyAccessibilityProfile}
+        registerSessionCleanup={registerSessionCleanup}
+        createSessionGuard={createSessionGuard}
+      />}
       {notice && <div className="modal-backdrop" role="presentation" onClick={() => setNotice('')}><section className="notice-modal" role="alertdialog" aria-modal="true" aria-labelledby="notice-title" onClick={(event) => event.stopPropagation()}><div className="modal-symbol"><Info size={22}/></div><h2 id="notice-title">안내</h2><p>{notice}</p><button id="notice-dismiss-button" data-a11y-action-id="civil.notice.dismiss" className="primary-button" onClick={() => setNotice('')}>확인</button></section></div>}
     </main>
   );

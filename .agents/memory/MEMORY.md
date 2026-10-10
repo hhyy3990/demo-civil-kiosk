@@ -1,1 +1,2 @@
-- [Kiosk scope](kiosk-scope.md) — keep the current public-service kiosk demo focused on certificate issuance, with integration concepts deferred.
+- [Kiosk scope](kiosk-scope.md) — focus issuance on resident-registration copies; preserve the existing QR/accessibility integration, with AI APIs out of scope.
+- [Local SDK Vite cache](local-sdk-vite-cache.md) — after a local SDK tarball update, clear stale optimized dependencies before browser verification.

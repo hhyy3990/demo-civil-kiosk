@@ -15,6 +15,8 @@ type ScannerHandle = {
 type QrSetupModalProps = {
   onClose: () => void;
   onApplyProfile: (profile: AccessibilityProfile) => void;
+  registerSessionCleanup: (cleanup: () => void) => () => void;
+  createSessionGuard: () => () => boolean;
 };
 
 function readableError(error: unknown) {
@@ -24,10 +26,16 @@ function readableError(error: unknown) {
   return '중앙 QR 서비스에 연결할 수 없습니다. 네트워크를 확인한 뒤 다시 시도해 주세요.';
 }
 
-export function QrSetupModal({ onClose, onApplyProfile }: QrSetupModalProps) {
+export function QrSetupModal({
+  onClose,
+  onApplyProfile,
+  registerSessionCleanup,
+  createSessionGuard,
+}: QrSetupModalProps) {
   const client = useMemo(() => createQrProfileClient(), []);
   const scannerContainerRef = useRef<HTMLDivElement>(null);
   const scannerRef = useRef<ScannerHandle | null>(null);
+  const mountedRef = useRef(false);
   const onCloseRef = useRef(onClose);
   const onApplyProfileRef = useRef(onApplyProfile);
   const loadingRef = useRef(false);
@@ -41,6 +49,14 @@ export function QrSetupModal({ onClose, onApplyProfile }: QrSetupModalProps) {
 
   useEffect(() => {
     let cancelled = false;
+    mountedRef.current = true;
+    const cleanupSessionResources = () => {
+      client.cancel();
+      scannerRef.current?.destroy();
+      scannerRef.current = null;
+    };
+    const unregisterSessionCleanup = registerSessionCleanup(cleanupSessionResources);
+
     void import('@naebangsik/kiosk-accessibility-sdk/qr-scanner')
       .then(({ mountQrScanner }) => {
         if (cancelled || !scannerContainerRef.current) return;
@@ -72,22 +88,25 @@ export function QrSetupModal({ onClose, onApplyProfile }: QrSetupModalProps) {
 
     return () => {
       cancelled = true;
+      mountedRef.current = false;
+      unregisterSessionCleanup();
       window.removeEventListener('keydown', handleKeyDown);
-      scannerRef.current?.destroy();
-      scannerRef.current = null;
-      client.cancel();
+      cleanupSessionResources();
     };
-  }, [client]);
+  }, [client, registerSessionCleanup]);
 
   async function resolveProfile(value: string, inputKind: 'scan' | 'manual') {
     setError('');
     loadingRef.current = true;
     setLoading(true);
+    const isCurrentSession = createSessionGuard();
     try {
       const profile = await client.resolve(value, inputKind);
+      if (!isCurrentSession() || !mountedRef.current) return;
       onApplyProfileRef.current(validateAccessibilityProfile(profile));
       onCloseRef.current();
     } catch (reason) {
+      if (!isCurrentSession() || !mountedRef.current) return;
       setError(readableError(reason));
       loadingRef.current = false;
       setLoading(false);

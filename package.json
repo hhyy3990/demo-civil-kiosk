@@ -9,7 +9,7 @@
     "preview": "vite preview --host 0.0.0.0"
   },
   "dependencies": {
-    "@naebangsik/kiosk-accessibility-sdk": "file:naebangsik-kiosk-accessibility-sdk-0.2.0_1791611089591.tgz",
+    "@naebangsik/kiosk-accessibility-sdk": "file:naebangsik-kiosk-accessibility-sdk-0.2.1_1791617733698.tgz",
     "@vitejs/plugin-react": "latest",
     "lucide-react": "latest",
     "react": "latest",
