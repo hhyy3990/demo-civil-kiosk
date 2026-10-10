@@ -1,0 +1,178 @@
+.qr-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 20;
+  display: grid;
+  place-items: center;
+  padding: 16px;
+  background: #1632469c;
+}
+
+.qr-setup-dialog {
+  width: min(100%, 520px);
+  max-height: min(92dvh, 860px);
+  overflow: auto;
+  border: 1px solid #a9bdc9;
+  background: #f5f8fa;
+  color: #18354a;
+  box-shadow: 0 20px 65px #102a3a55;
+}
+
+.qr-setup-heading {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  padding: 14px 16px;
+  background: linear-gradient(#fff, #eef4f7);
+  border-bottom: 1px solid #bfd0d9;
+}
+
+.qr-setup-mark {
+  width: 38px;
+  height: 38px;
+  flex: none;
+  display: grid;
+  place-items: center;
+  border: 1px solid #aacbdc;
+  background: #fff;
+  color: #397ea1;
+}
+
+.qr-setup-heading h2 {
+  margin: 0;
+  color: #1d4760;
+  font-size: 16px;
+}
+
+.qr-setup-eyebrow {
+  margin: 0 0 3px;
+  color: #35759a;
+  font-size: 10px;
+  font-weight: 800;
+}
+
+.qr-dialog-close {
+  width: 40px;
+  height: 40px;
+  flex: none;
+  display: grid;
+  place-items: center;
+  margin-left: auto;
+  border: 1px solid #b6c4cb;
+  background: #fff;
+  color: #496675;
+  cursor: pointer;
+}
+
+.qr-setup-body {
+  padding: 16px;
+}
+
+.qr-setup-intro {
+  margin: 0 0 12px;
+  color: #617b89;
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.qr-scanner-mount:empty { display: none; }
+
+.qr-camera-panel {
+  margin: 0 0 12px;
+  padding: 10px;
+  border: 1px solid #c5d4db;
+  background: #edf4f7;
+}
+
+.qr-camera-stage {
+  position: relative;
+  min-height: 150px;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  background: #18354a;
+  color: #fff;
+}
+
+.qr-camera-video {
+  display: block;
+  width: 100%;
+  max-height: 230px;
+  object-fit: cover;
+}
+
+.qr-camera-placeholder {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  pointer-events: none;
+}
+
+.qr-camera-placeholder span {
+  display: grid;
+  place-items: center;
+  width: min(58vw, 180px);
+  aspect-ratio: 1;
+  border: 2px solid #d6f1ff;
+  color: #e4f5ff;
+  font-size: 12px;
+}
+
+.qr-camera-instructions strong { display: block; margin-top: 9px; font-size: 12px; }
+.qr-camera-instructions p,
+.qr-camera-instructions small { display: block; margin: 5px 0 0; color: #617b89; font-size: 10px; line-height: 1.5; }
+.qr-camera-status { margin: 8px 0; font-size: 11px; }
+.qr-camera-actions { display: flex; justify-content: flex-end; }
+.qr-camera-actions button {
+  min-height: 42px;
+  padding: 8px 12px;
+  border: 1px solid #10527f;
+  background: #176393;
+  color: white;
+  font: inherit;
+  font-size: 11px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.qr-manual-form {
+  display: grid;
+  gap: 8px;
+  padding: 13px;
+  border: 1px solid #c5d4db;
+  background: #fff;
+}
+
+.qr-manual-form label { color: #294e63; font-size: 12px; font-weight: 700; }
+.qr-manual-form input {
+  width: 100%;
+  min-height: 44px;
+  border: 1px solid #9fb5c0;
+  padding: 9px 10px;
+  background: #fff;
+  color: #1d3f55;
+  font: inherit;
+  font-size: 12px;
+}
+.qr-manual-form input:focus-visible { outline: 3px solid #e5a629; outline-offset: 2px; }
+.qr-manual-help { margin: 0; color: #718590; font-size: 10px; line-height: 1.5; }
+.qr-apply-button { justify-self: end; min-width: 118px; }
+.qr-apply-button:disabled { opacity: .55; cursor: not-allowed; }
+.qr-camera-fallback,
+.qr-error { margin: 9px 0; padding: 9px 10px; font-size: 11px; line-height: 1.5; }
+.qr-camera-fallback { border: 1px solid #c5d4db; background: #edf4f7; color: #536f7c; }
+.qr-error { border: 1px solid #d4a5a5; background: #fbefef; color: #8c3f3f; }
+.qr-privacy-note { display: flex; gap: 7px; align-items: flex-start; margin-top: 12px; color: #6d8088; font-size: 10px; line-height: 1.5; }
+.qr-privacy-note svg { flex: none; }
+.qr-service-link { display: inline-flex; align-items: center; gap: 5px; margin-top: 12px; color: #246b91; font-size: 11px; font-weight: 700; }
+
+@media (max-width: 520px) {
+  .qr-modal-backdrop { padding: 9px; }
+  .qr-setup-dialog { max-height: 94dvh; }
+  .qr-setup-heading { padding: 11px 12px; }
+  .qr-setup-body { padding: 12px; }
+}

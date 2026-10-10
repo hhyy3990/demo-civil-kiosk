@@ -17,6 +17,7 @@
 .screen-view { flex:1; padding:22px 22px 20px; display:flex;flex-direction:column; }
 .title-band { padding:13px 14px;display:flex;align-items:center;gap:12px;background:linear-gradient(90deg,#d8edf8,#eff7fb);border:1px solid #b6d5e5;margin-bottom:13px; }
 .title-icon { flex:none;width:32px;height:32px;border-radius:50%;display:grid;place-items:center;background:#fff;border:1px solid #aacbdc;color:#397ea1; }.title-band h1 { margin:0;color:#1d4760;font-size:17px;letter-spacing:-.04em; }.title-band p {margin:4px 0 0;color:#617b89;font-size:11px;}
+.main-title-copy { flex:1;min-width:0; }.main-title-mobile-break { display:none; }.qr-profile-trigger { flex:none;width:71px;min-height:50px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;padding:4px;border:1px solid #91b4c6;background:linear-gradient(#fff,#e7f2f7);color:#2d6d8c;font:700 9px/1.2 'Noto Sans KR',sans-serif;text-align:center;cursor:pointer; }.qr-profile-trigger:hover { background:#dceef6;border-color:#5f96b0; }.qr-profile-trigger svg { flex:none; }
 .demo-banner {display:flex;align-items:center;gap:10px;padding:8px 11px;margin-bottom:12px;background:#eef5e9;border:1px solid #c6d9be;color:#526c54;font-size:11px;}
 .demo-tag {font-weight:800;color:#4b6b4f;border-right:1px solid #bfd0b7;padding-right:9px;white-space:nowrap}
 .certificate-grid {display:grid;grid-template-columns:repeat(3,1fr);gap:7px;}
@@ -46,7 +47,7 @@
   .machine-top {height:26px;padding:0 12px;background:linear-gradient(#bdc9ce,#d8e0e3)}
   .screen-shell {border:0;border-top:3px solid #85969e;border-bottom:3px solid #85969e;border-radius:0;min-height:100dvh;min-height:100svh;}
   .screen-header {min-height:58px;padding:8px 13px}.brand-seal {width:31px;height:31px}.service-brand strong {font-size:13px}.header-right {gap:7px}.clock {font-size:11px}.step-count {font-size:9px;min-width:44px}
-  .screen-content {overflow-y:auto;padding-bottom:90px;overscroll-behavior:contain;scrollbar-width:thin}.screen-view {padding:17px 14px 16px}.title-band {padding:11px 10px;gap:9px}.title-band h1 {font-size:14px}.title-band p {font-size:10px}
+   .screen-content {overflow-y:auto;padding-bottom:90px;overscroll-behavior:contain;scrollbar-width:thin}.screen-view {padding:17px 14px 16px}.title-band {padding:11px 10px;gap:9px}.title-band h1 {font-size:14px}.title-band p {font-size:10px}.main-title-mobile-break { display:block; }
   .demo-banner {font-size:10px;gap:7px;padding:8px}.demo-tag {font-size:9px;padding-right:7px}
   .certificate-grid {grid-template-columns:repeat(2,minmax(0,1fr));gap:5px}.category-button {min-height:51px;padding:7px 20px 7px 8px;gap:6px}.category-number {font-size:8px}.category-name {font-size:10px}.category-arrow {right:4px;width:13px}
   .page-title {margin-bottom:15px;padding-bottom:12px}.page-title h1 {font-size:17px}.page-title p {font-size:10px}

@@ -9,12 +9,13 @@
     "preview": "vite preview --host 0.0.0.0"
   },
   "dependencies": {
+    "@naebangsik/kiosk-accessibility-sdk": "file:naebangsik-kiosk-accessibility-sdk-0.2.0_1791611089591.tgz",
     "@vitejs/plugin-react": "latest",
-    "vite": "latest",
-    "typescript": "latest",
+    "lucide-react": "latest",
     "react": "latest",
     "react-dom": "latest",
-    "lucide-react": "latest"
+    "typescript": "latest",
+    "vite": "latest"
   },
   "devDependencies": {
     "@types/react": "latest",
