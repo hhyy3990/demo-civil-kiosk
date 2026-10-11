@@ -1,4 +1,4 @@
-import { Check, ChevronRight, Fingerprint, Home, Info, Printer, QrCode, ShieldCheck } from 'lucide-react';
+import { Check, ChevronRight, Fingerprint, Home, Info, Printer, ShieldCheck } from 'lucide-react';
 
 export type IssueOptions = {
   address: boolean;
@@ -12,20 +12,12 @@ const certificateCategories = [
   '국세증명', '건강보험', '고용·산재보험', '여권', '국민연금', '교통(경찰청)',
 ];
 
-export function MainMenuScreen({ onSelectCategory, onOpenAccessibility }: { onSelectCategory: (category: string) => void; onOpenAccessibility: () => void }) {
+export function MainMenuScreen({ onSelectCategory }: { onSelectCategory: (category: string) => void }) {
   return (
     <section className="screen-view main-view">
       <div className="title-band">
         <div className="title-icon"><Info size={19} /></div>
         <div className="main-title-copy"><h1>발급을 원하시는 증명서를<br className="main-title-mobile-break"/>선택하십시오.</h1><p data-a11y-detail>원하는 민원서류를 선택해 주십시오.</p></div>
-        <button
-          id="qr-accessibility-button"
-          className="qr-profile-trigger"
-          type="button"
-          aria-label="내 QR로 화면 설정"
-          data-a11y-action-id="civil.qr.open"
-          onClick={onOpenAccessibility}
-        ><QrCode size={16} aria-hidden="true"/><span>내 QR로<br/>화면 설정</span></button>
       </div>
       <div className="demo-banner"><span className="demo-tag">데모 버전 안내</span><span>현재 주민등록등본 발급 기능만 제공됩니다.</span></div>
       <div className="certificate-grid" aria-label="증명서 종류" data-a11y-grid>

@@ -3,6 +3,7 @@ import { ArrowLeft, Check, Home, Info } from 'lucide-react';
 import {
   DEFAULT_ACCESSIBILITY_PROFILE,
   type AccessibilityProfile,
+  type BottomViewportHeightPercent,
 } from '@naebangsik/kiosk-accessibility-sdk';
 import {
   CompleteScreen,
@@ -18,6 +19,7 @@ import {
   type IssueOptions,
 } from './components/KioskScreens';
 import { QrSetupModal } from './components/QrSetupModal';
+import { BottomViewportTestControls } from './components/BottomViewportTestControls';
 import { useKioskAccessibility, type KioskStep } from './useKioskAccessibility';
 import '@naebangsik/kiosk-accessibility-sdk/styles.css';
 import './styles.css';
@@ -40,6 +42,12 @@ function App() {
   const [printingProgress, setPrintingProgress] = useState(false);
   const [qrModalOpen, setQrModalOpen] = useState(false);
   const [accessibilityProfile, setAccessibilityProfile] = useState<AccessibilityProfile>({ ...DEFAULT_ACCESSIBILITY_PROFILE });
+  const [qrProfileApplied, setQrProfileApplied] = useState(false);
+  const [devViewportPercent, setDevViewportPercent] = useState<BottomViewportHeightPercent | null>(null);
+  const showViewportTestControls = import.meta.env.DEV
+    && new URLSearchParams(window.location.search).get('viewport-test') === '1';
+  const openQrModal = useCallback(() => setQrModalOpen(true), []);
+  const closeQrModal = useCallback(() => setQrModalOpen(false), []);
 
   const moveBack = () => {
     if (step === 'main-menu') return;
@@ -87,16 +95,20 @@ function App() {
     qrModalOpen,
     noticeOpen: Boolean(notice),
     profile: accessibilityProfile,
+    qrProfileApplied,
+    onOpenQr: openQrModal,
+    viewportTestEnabled: showViewportTestControls,
+    devViewportPercent,
   });
   const reset = () => {
     setStep('main-menu'); setResidentNumber(''); setOptions({ address: true, history: false, household: false });
     setFeeExempt(false); setCopies(1); setPrintingProgress(false); setNotice('');
     setQrModalOpen(false);
     setAccessibilityProfile({ ...DEFAULT_ACCESSIBILITY_PROFILE });
+    setQrProfileApplied(false);
+    setDevViewportPercent(null);
     accessibilitySdkRef.current?.endSession();
   };
-  const openQrModal = useCallback(() => setQrModalOpen(true), []);
-  const closeQrModal = useCallback(() => setQrModalOpen(false), []);
   const registerSessionCleanup = useCallback((cleanup: () => void) => (
     accessibilitySdkRef.current?.registerSessionCleanup(cleanup) ?? (() => undefined)
   ), []);
@@ -105,10 +117,17 @@ function App() {
   ), []);
   const applyAccessibilityProfile = useCallback((profile: AccessibilityProfile) => {
     setAccessibilityProfile(profile);
+    setQrProfileApplied(true);
+    setDevViewportPercent(profile.viewportMode?.heightPercent ?? null);
     setNotice('내 방식 QR의 접근성 설정을 적용했습니다.');
-  }, [accessibilitySdkRef]);
+  }, []);
+  const setDevViewportMode = useCallback((heightPercent: BottomViewportHeightPercent | null) => {
+    if (!import.meta.env.DEV || qrProfileApplied) return;
+    setDevViewportPercent(heightPercent);
+  }, [qrProfileApplied]);
 
   return (
+    <>
     <main className="stage" ref={rootRef}>
       <div className="ambient-label"><span className="status-dot" /> 민원서류 발급 서비스</div>
       <section className="machine" aria-label="무인민원발급기 화면">
@@ -121,7 +140,7 @@ function App() {
           {step !== 'main-menu' && <div className="progress-rail" aria-label={`진행 단계 ${stepNames[step]}`}><div style={{ width: `${Math.min(100, (steps.indexOf(step) / 9) * 100)}%` }} /></div>}
 
           <div className="screen-content" key={step} data-screen={step} data-a11y-slot="scroll-content" data-a11y-reflow>
-            {step === 'main-menu' && <MainMenuScreen onSelectCategory={selectCategory} onOpenAccessibility={openQrModal}/>}
+            {step === 'main-menu' && <MainMenuScreen onSelectCategory={selectCategory}/>}
             {step === 'resident-type' && <ResidentTypeScreen onSelectCopy={() => setStep('resident-number')} onUnavailable={() => setNotice('주민등록표(초본)은 현재 준비 중입니다. 데모에서는 등본 발급을 이용해 주십시오.')}/>}
             {step === 'resident-number' && <ResidentNumberScreen residentNumber={residentNumber} onDigit={addDigit} onClear={() => setResidentNumber('')} onCorrect={() => setResidentNumber((old) => old.slice(0, -1))}/>}
             {step === 'fingerprint' && <FingerprintScreen onConfirm={() => setStep('options')}/>}
@@ -146,14 +165,49 @@ function App() {
         <div className="machine-bottom"><span className="machine-grille"/><span className="machine-bottom-text">민원서류 발급부</span><span className="machine-power"><i/> 전원</span></div>
       </section>
       <div className="page-caption">민원서류 발급 시뮬레이션 <span>·</span> 주민등록표(등본)</div>
-      {qrModalOpen && <QrSetupModal
+      <QrSetupModal
+        active={qrModalOpen}
         onClose={closeQrModal}
         onApplyProfile={applyAccessibilityProfile}
         registerSessionCleanup={registerSessionCleanup}
         createSessionGuard={createSessionGuard}
-      />}
-      {notice && <div className="modal-backdrop" role="presentation" onClick={() => setNotice('')}><section className="notice-modal" role="alertdialog" aria-modal="true" aria-labelledby="notice-title" onClick={(event) => event.stopPropagation()}><div className="modal-symbol"><Info size={22}/></div><h2 id="notice-title">안내</h2><p>{notice}</p><button id="notice-dismiss-button" data-a11y-action-id="civil.notice.dismiss" className="primary-button" onClick={() => setNotice('')}>확인</button></section></div>}
+      />
+      <div
+        className="modal-backdrop"
+        data-a11y-viewport-overlay
+        role="presentation"
+        style={{ display: notice ? 'grid' : 'none' }}
+        onClick={() => setNotice('')}
+      >
+        <section
+          className="notice-modal"
+          role="alertdialog"
+          aria-modal="true"
+          aria-labelledby="notice-title"
+          onClick={(event) => event.stopPropagation()}
+        >
+          <div className="modal-symbol"><Info size={22}/></div>
+          <h2 id="notice-title">안내</h2>
+          <p>{notice || '\u00a0'}</p>
+          <button
+            id="notice-dismiss-button"
+            data-a11y-action-id="civil.notice.dismiss"
+            className="primary-button"
+            onClick={() => setNotice('')}
+          >
+            확인
+          </button>
+        </section>
+      </div>
     </main>
+    {showViewportTestControls && (
+      <BottomViewportTestControls
+        activePercent={devViewportPercent}
+        onSelect={setDevViewportMode}
+        disabled={qrProfileApplied}
+      />
+    )}
+    </>
   );
 }
 

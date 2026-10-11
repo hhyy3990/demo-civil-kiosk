@@ -9,10 +9,20 @@ import {
 import './qr-setup-modal.css';
 
 type ScannerHandle = {
+  stop(): void;
   destroy(): void;
 };
 
+function setScannerText(container: HTMLDivElement | null, selector: string, value: string) {
+  const element = container?.querySelector<HTMLElement>(selector);
+  if (!element || element.textContent === value) return;
+  const textNode = element.firstChild;
+  if (textNode?.nodeType === Node.TEXT_NODE) textNode.nodeValue = value;
+  else element.textContent = value;
+}
+
 type QrSetupModalProps = {
+  active: boolean;
   onClose: () => void;
   onApplyProfile: (profile: AccessibilityProfile) => void;
   registerSessionCleanup: (cleanup: () => void) => () => void;
@@ -27,6 +37,7 @@ function readableError(error: unknown) {
 }
 
 export function QrSetupModal({
+  active,
   onClose,
   onApplyProfile,
   registerSessionCleanup,
@@ -48,38 +59,58 @@ export function QrSetupModal({
   onApplyProfileRef.current = onApplyProfile;
 
   useEffect(() => {
+    if (!active) {
+      loadingRef.current = false;
+      setManualValue('');
+      setError('');
+      setCameraMessage('');
+      setLoading(false);
+      return;
+    }
+
     let cancelled = false;
     mountedRef.current = true;
     const cleanupSessionResources = () => {
       client.cancel();
-      scannerRef.current?.destroy();
-      scannerRef.current = null;
+      const cameraButton = scannerContainerRef.current?.querySelector<HTMLButtonElement>('.qr-camera-actions button');
+      const cameraMayBeRunning = Boolean(
+        cameraButton && (cameraButton.disabled || cameraButton.textContent?.trim() === '카메라 끄기'),
+      );
+      if (cameraMayBeRunning) {
+        scannerRef.current?.destroy();
+        scannerRef.current = null;
+      } else {
+        scannerRef.current?.stop();
+        setScannerText(scannerContainerRef.current, '.qr-camera-actions button', '카메라로 QR 스캔');
+        setScannerText(scannerContainerRef.current, '.qr-camera-status', 'QR 코드를 화면 가운데에 맞춰 주세요.');
+      }
     };
     const unregisterSessionCleanup = registerSessionCleanup(cleanupSessionResources);
 
-    void import('@naebangsik/kiosk-accessibility-sdk/qr-scanner')
-      .then(({ mountQrScanner }) => {
-        if (cancelled || !scannerContainerRef.current) return;
-        const scanner = mountQrScanner({
-          container: scannerContainerRef.current,
-          onScan: (value) => {
-            // The SDK stops camera tracks before this callback; destroy the view before network lookup.
-            scannerRef.current?.destroy();
-            scannerRef.current = null;
-            void resolveProfile(value, 'scan');
-          },
-          onCameraUnavailable: (message) => {
-            setCameraMessage(message);
-          },
+    if (!scannerRef.current) {
+      void import('@naebangsik/kiosk-accessibility-sdk/qr-scanner')
+        .then(({ mountQrScanner }) => {
+          if (cancelled || !scannerContainerRef.current || scannerRef.current) return;
+          const scanner = mountQrScanner({
+            container: scannerContainerRef.current,
+            onScan: (value) => {
+              void resolveProfile(value, 'scan');
+            },
+            onCameraUnavailable: (message) => {
+              if (!cancelled) setCameraMessage(message);
+            },
+          });
+          scannerRef.current = scanner;
+          const cameraButton = scannerContainerRef.current.querySelector<HTMLButtonElement>('.qr-camera-actions button');
+          if (cameraButton) {
+            cameraButton.id = 'qr-camera-start-button';
+            cameraButton.dataset.a11yActionId = 'civil.qr.camera-start';
+          }
+        })
+        .catch(() => {
+          if (!cancelled) setCameraMessage('카메라를 시작할 수 없습니다. 아래에 QR 주소를 직접 입력해 주세요.');
         });
-        scannerRef.current = scanner;
-        const cameraButton = scannerContainerRef.current.querySelector<HTMLButtonElement>('.qr-camera-actions button');
-        if (cameraButton) {
-          cameraButton.id = 'qr-camera-start-button';
-          cameraButton.dataset.a11yActionId = 'civil.qr.camera-start';
-        }
-      })
-      .catch(() => setCameraMessage('카메라를 시작할 수 없습니다. 아래에 QR 주소를 직접 입력해 주세요.'));
+    }
 
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape' && !loadingRef.current) onCloseRef.current();
@@ -93,7 +124,12 @@ export function QrSetupModal({
       window.removeEventListener('keydown', handleKeyDown);
       cleanupSessionResources();
     };
-  }, [client, registerSessionCleanup]);
+  }, [active, client, registerSessionCleanup]);
+
+  useEffect(() => () => {
+    scannerRef.current?.destroy();
+    scannerRef.current = null;
+  }, []);
 
   async function resolveProfile(value: string, inputKind: 'scan' | 'manual') {
     setError('');
@@ -120,7 +156,7 @@ export function QrSetupModal({
   }
 
   return (
-    <div className="qr-modal-backdrop" role="presentation" onMouseDown={(event) => {
+    <div className="qr-modal-backdrop" data-a11y-viewport-overlay role="presentation" aria-hidden={!active} style={{ display: active ? 'grid' : 'none' }} onMouseDown={(event) => {
       if (event.target === event.currentTarget && !loading) onClose();
     }}>
       <section
@@ -149,7 +185,7 @@ export function QrSetupModal({
         <div className="qr-setup-body">
           <p className="qr-setup-intro">QR을 스캔하거나 주소를 입력하면 글씨·버튼·안내 설정을 적용합니다.</p>
           <div ref={scannerContainerRef} className="qr-scanner-mount" />
-          {cameraMessage && <p className="qr-camera-fallback" role="status">{cameraMessage}</p>}
+          <p className="qr-camera-fallback" role="status" style={{ display: cameraMessage ? 'block' : 'none' }}>{cameraMessage}</p>
 
           <form className="qr-manual-form" onSubmit={handleSubmit}>
             <label htmlFor="qr-manual-value">QR 주소 또는 토큰 직접 입력</label>
@@ -176,7 +212,7 @@ export function QrSetupModal({
             </button>
           </form>
 
-          {error && <p className="qr-error" role="alert">{error}</p>}
+          <p className="qr-error" role="alert" style={{ display: error ? 'block' : 'none' }}>{error}</p>
           <div className="qr-privacy-note"><Info size={16} aria-hidden="true" /><span>QR 토큰은 이 앱에 저장하지 않습니다. 설정 조회를 위해 공식 서비스에 전달됩니다.</span></div>
           <a className="qr-service-link" href={CENTRAL_QR_ORIGIN} target="_blank" rel="noreferrer">
             내 방식 QR 만들기 <ExternalLink size={14} aria-hidden="true" />

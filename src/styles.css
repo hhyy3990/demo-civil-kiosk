@@ -1,5 +1,6 @@
 #root { min-height: 100dvh; }
 .stage { min-height: 100dvh; display: flex; flex-direction: column; align-items: center; padding: 24px 16px 20px; background: linear-gradient(125deg,#dfe8ed,#cfdce3 54%,#e5ecef); }
+.stage.a11y-qr-entry-dock-home.a11y-qr-entry-dock-scroll-area::after { flex: 0 0 auto; }
 .ambient-label { width: min(100%, 520px); color: #627987; font-size: 11px; letter-spacing: .08em; text-transform: uppercase; margin: 0 0 10px 5px; display:flex; align-items:center; gap:8px; }
 .status-dot,.footer-led { width:7px;height:7px;border-radius:50%;background:#71a384;display:inline-block;box-shadow:0 0 0 3px #d9e9de; }
 .machine { width: min(100%, 560px); background: linear-gradient(90deg,#b8c4ca,#eef2f3 8%,#c4ced3 94%,#aebbc1); border: 1px solid #9daeb7; padding: 12px 12px 0; border-radius: 13px 13px 7px 7px; box-shadow: 0 24px 60px #61778230, inset 0 1px #fff; }

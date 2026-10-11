@@ -1,9 +1,12 @@
-import { useEffect, useRef, type RefObject } from 'react';
+import { useEffect, useLayoutEffect, useRef, type RefObject } from 'react';
 import {
   createAccessibilitySdk,
+  createQrEntryDock,
   type AccessibilityAdapter,
   type AccessibilityProfile,
   type AccessibilitySdk,
+  type BottomViewportHeightPercent,
+  type QrEntryDockController,
 } from '@naebangsik/kiosk-accessibility-sdk';
 
 export type KioskStep =
@@ -42,6 +45,10 @@ type UseKioskAccessibilityOptions = {
   qrModalOpen: boolean;
   noticeOpen: boolean;
   profile: AccessibilityProfile;
+  qrProfileApplied: boolean;
+  onOpenQr: () => void;
+  viewportTestEnabled: boolean;
+  devViewportPercent: BottomViewportHeightPercent | null;
 };
 
 const guideByStep: Record<KioskStep, { title: string; text: string; actionId: string } | null> = {
@@ -94,6 +101,7 @@ const guideByStep: Record<KioskStep, { title: string; text: string; actionId: st
 };
 
 const primaryActionIdsByStep: Partial<Record<KioskStep, readonly string[]>> = {
+  'main-menu': ['main-resident-button'],
   'resident-type': ['resident-register-copy-button'],
   fingerprint: ['fingerprint-confirm-button'],
   'fee-waiver': ['fee-waiver-yes-button', 'fee-waiver-no-button'],
@@ -146,8 +154,16 @@ export function useKioskAccessibility({
   qrModalOpen,
   noticeOpen,
   profile,
+  qrProfileApplied,
+  onOpenQr,
+  viewportTestEnabled,
+  devViewportPercent,
 }: UseKioskAccessibilityOptions) {
   const sdkRef = useRef<AccessibilitySdk | null>(null);
+  const adapterRef = useRef<AccessibilityAdapter | null>(null);
+  const qrDockRef = useRef<QrEntryDockController | null>(null);
+  const qrDockViewportPercentRef = useRef<BottomViewportHeightPercent | null>(null);
+  const onOpenQrRef = useRef(onOpenQr);
   const lastSpokenStepRef = useRef<KioskStep | null>(null);
   const stateRef = useRef<AccessibilityState>({
     step,
@@ -161,11 +177,12 @@ export function useKioskAccessibility({
 
   stateRef.current = { step, options, feeExempt, copies, qrModalOpen, noticeOpen };
   profileRef.current = profile;
+  onOpenQrRef.current = onOpenQr;
 
   useEffect(() => {
     const root = rootRef.current;
     if (!root) return;
-    const sdkRoot = root.ownerDocument.documentElement;
+    const sdkRoot = root;
 
     const adapter: AccessibilityAdapter = {
       getSnapshot: () => {
@@ -239,12 +256,19 @@ export function useKioskAccessibility({
           bottomControls: [root.querySelector<HTMLElement>('[data-a11y-slot="bottom-controls"]')].filter(
             (element): element is HTMLElement => Boolean(element),
           ),
-          scrollArea: root.ownerDocument.scrollingElement as HTMLElement | null,
+          // The document scrolls in the ordinary layout. Register the contained kiosk
+          // screen root so the SDK can make that screen itself scrollable in viewport mode.
+          scrollArea: root,
           reflowContainers: Array.from(root.querySelectorAll<HTMLElement>('[data-a11y-reflow]')),
           gridContainers: Array.from(root.querySelectorAll<HTMLElement>('[data-a11y-grid]')),
           actionGroups: Array.from(root.querySelectorAll<HTMLElement>('[data-a11y-action-group]')),
-          guidanceAvoidAreas: [root.querySelector<HTMLElement>('.screen-header')].filter(
-            (element): element is HTMLElement => Boolean(element),
+          viewportOverlays: Array.from(
+            root.querySelectorAll<HTMLElement>('[data-a11y-viewport-overlay]'),
+          ),
+          guidanceAvoidAreas: Array.from(
+            root.querySelectorAll<HTMLElement>('.footer-controls button'),
+          ).concat(
+            Array.from(document.querySelectorAll<HTMLElement>('[data-a11y-qr-entry-dock]')),
           ),
           primaryActions: (primaryActionIdsByStep[stateRef.current.step] ?? [])
             .map((id) => root.querySelector<HTMLElement>(`#${id}`))
@@ -267,6 +291,29 @@ export function useKioskAccessibility({
       },
     });
     sdkRef.current = sdk;
+    adapterRef.current = adapter;
+    const initialDockViewportPercent =
+      viewportTestEnabled && !qrProfileApplied && stateRef.current.step === 'main-menu'
+        ? devViewportPercent
+        : null;
+    const qrDock = createQrEntryDock({
+      root: sdkRoot,
+      adapter,
+      active: false,
+      onOpenQr: () => onOpenQrRef.current(),
+      label: '내 QR로 화면 설정',
+      theme: {
+        surface: '#e8f0f4',
+        foreground: '#17384d',
+        button: '#176393',
+        buttonForeground: '#ffffff',
+      },
+      bottomViewportPercent: initialDockViewportPercent ?? undefined,
+    });
+    qrDockRef.current = qrDock;
+    qrDockViewportPercentRef.current = initialDockViewportPercent;
+    qrDock.setActive(stateRef.current.step === 'main-menu');
+    sdk.notifyScreenChange(`civil.${stateRef.current.step}`);
 
     let resizeFrame: number | null = null;
     let lastViewport = `${window.innerWidth}x${window.innerHeight}`;
@@ -296,12 +343,70 @@ export function useKioskAccessibility({
     return () => {
       window.removeEventListener('resize', handleResize);
       if (resizeFrame !== null) window.cancelAnimationFrame(resizeFrame);
+      qrDock.destroy();
+      qrDockRef.current = null;
+      qrDockViewportPercentRef.current = null;
+      adapterRef.current = null;
       sdk.destroy();
       delete root.dataset.a11yDiagnostics;
       delete root.dataset.a11yLayoutCorrections;
       sdkRef.current = null;
     };
   }, [rootRef]);
+
+  useLayoutEffect(() => {
+    const sdk = sdkRef.current;
+    if (!sdk) return;
+    sdk.notifyScreenChange(`civil.${step}`);
+  }, [step]);
+
+  useEffect(() => {
+    const root = rootRef.current;
+    const adapter = adapterRef.current;
+    const sdk = sdkRef.current;
+    if (!root || !adapter || !sdk) return;
+
+    const isHomeScreen = step === 'main-menu';
+    const desiredDockViewportPercent =
+      isHomeScreen && viewportTestEnabled && !qrProfileApplied ? devViewportPercent : null;
+
+    if (!isHomeScreen) qrDockRef.current?.setActive(false);
+
+    if (desiredDockViewportPercent !== qrDockViewportPercentRef.current) {
+      qrDockRef.current?.destroy();
+      const nextDock = createQrEntryDock({
+        root,
+        adapter,
+        active: false,
+        onOpenQr: () => onOpenQrRef.current(),
+        label: '내 QR로 화면 설정',
+        theme: {
+          surface: '#e8f0f4',
+          foreground: '#17384d',
+          button: '#176393',
+          buttonForeground: '#ffffff',
+        },
+        bottomViewportPercent: desiredDockViewportPercent ?? undefined,
+      });
+      qrDockRef.current = nextDock;
+      qrDockViewportPercentRef.current = desiredDockViewportPercent;
+    }
+
+    if (isHomeScreen) {
+      qrDockRef.current?.setActive(true);
+    }
+
+    if (!qrProfileApplied) {
+      if (isHomeScreen) {
+        sdk.setViewportMode(null);
+      } else {
+        const mode = viewportTestEnabled && devViewportPercent !== null
+          ? { mode: 'bottom' as const, heightPercent: devViewportPercent }
+          : null;
+        sdk.setViewportMode(mode);
+      }
+    }
+  }, [devViewportPercent, qrProfileApplied, rootRef, step, viewportTestEnabled]);
 
   useEffect(() => {
     const sdk = sdkRef.current;

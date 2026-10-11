@@ -1,0 +1,52 @@
+.bottom-viewport-test-controls {
+  position: fixed;
+  top: 8px;
+  right: 8px;
+  z-index: 2147483000;
+  width: min(240px, calc(100vw - 16px));
+  padding: 9px;
+  border: 1px solid #5b7582;
+  background: #f7fafb;
+  color: #18354a;
+  box-shadow: 0 5px 20px #122c3b40;
+  font: 11px/1.4 'Noto Sans KR', sans-serif;
+}
+
+.bottom-viewport-test-controls strong {
+  display: block;
+  font-size: 11px;
+}
+
+.bottom-viewport-test-controls p {
+  margin: 4px 0 7px;
+  color: #5d7581;
+  font-size: 10px;
+}
+
+.bottom-viewport-test-options {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 4px;
+}
+
+.bottom-viewport-test-options button {
+  min-height: 34px;
+  padding: 4px;
+  border: 1px solid #9fb3bd;
+  background: #fff;
+  color: #315268;
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.bottom-viewport-test-options button[aria-pressed='true'] {
+  border-color: #246b91;
+  background: #dceef6;
+  color: #174f70;
+}
+
+.bottom-viewport-test-options button:focus-visible {
+  outline: 3px solid #e5a629;
+  outline-offset: 1px;
+}
