@@ -51,14 +51,14 @@ In a 360×667 bottom-viewport layout, do not treat the stage's absolute maximum 
 
 **How to apply:** Check the last tile's real bounds and `elementFromPoint` hit target during user-driven scrolling, not only at scrollTop zero or maximum. Report any fixed-region overlap separately and avoid a host layout workaround unless requested.
 
-At 1440×900, the v3 bottom-viewport 80% profile places `.stage` at y=166..828 while the first heading remains at y=144..175; its center no longer hit-tests to the heading. Without the profile, `.stage` begins at y=0 and the heading is hit-testable. The host's desktop machine shell is taller than the reduced stage and is vertically centered, so its top content falls outside the SDK-sized scroll area. This is not a `screenId` reset failure.
+At wide desktop sizes, unsafe vertical centering can place an oversized kiosk shell above `.stage`'s scroll origin. `safe center` preserves centering when the shell fits and aligns it from the start when it does not. The SDK bottom-viewport mode already uses safe centering; the remaining issue is the host's normal desktop alignment.
 
-**Why:** Replit Preview measurements showed the heading's position barely changed when the profile moved the stage boundary, while the host shell retained its minimum height. The same clipping did not occur in the no-profile baseline.
+**Why:** Actual Replit Preview measurements at 1440×900 found the unprofiled machine frame at y=-14.5 and the large-text v3-null header at y=-7.78 while `.stage.scrollTop` was 0. A one-property safe-alignment experiment moved the machine to y=50 and the header to y=104; the SDK-owned bottom modes already kept the header visible.
 
-**How to apply:** Test active bottom-viewport profiles at wide desktop sizes. Compare the stage and heading bounds and hit-test the heading before attributing clipping to screen-change scrolling. Do not add host-only scroll resets or CSS workarounds; determine whether a reusable SDK contract or host-layout change is appropriate first.
+**How to apply:** At wide sizes, measure the whole host frame, header, and actual scroll owner in both normal and QR-profile states. Prefer safe alignment to offsets or repeated scroll calls, and keep SDK layout behavior shared rather than duplicating it in the host.
 
-The SDK bottom viewport and QR-entry dock are configured separately. If the host applies a profile viewport but does not pass its `bottomViewportPercent` when creating/recreating the dock, the dock remains in home mode and its pseudo-element can reserve the dock plus controls again.
+SDK v0.5.6 synchronizes QR v3 `viewportMode` to the existing QR-entry dock internally. Do not derive a second host `bottomViewportPercent`; keep an explicit developer override only when no QR profile is active.
 
-**Why:** In the kiosk, a 60% profile set the stage bottom inset to 165px while the dock's pseudo-element independently added 165px to `scrollHeight`; the same SDK's viewport-test path passed the dock option and produced a 0px pseudo-element.
+**Why:** Replit Preview tests applied v3 null/60/70/80 modes through one dock node; the SDK updated viewport state without creating duplicate docks. `endSession()` returned to one default dock.
 
-**How to apply:** When profile viewport settings change, synchronize the dock's creation option as well as the SDK viewport; the current dock controller has no setter, so recreation may be needed. Compare actual scrollHeight with the pseudo-element temporarily zeroed, then restored, before classifying this as an SDK-wide defect.
+**How to apply:** Create one dock and let SDK profile application synchronize its viewport. Verify dock count and identity during profile changes, retain only the no-profile developer override, and confirm one default dock after session end.

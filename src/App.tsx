@@ -153,7 +153,7 @@ function App() {
           </div>
 
           <footer className="device-footer" data-a11y-slot="bottom-controls">
-            <div className="footer-service"><span className="footer-led" /> 민원 발급 시뮬레이션 <span className="footer-separator"/> 실제 신청 정보는 저장되지 않습니다</div>
+            <div className="footer-service"><span className="footer-led" /> <span className="footer-simulation-label">민원 발급 시뮬레이션</span> <span className="footer-separator"/> <span className="footer-privacy-notice">실제 신청 정보는 저장되지 않습니다</span></div>
             <div className="footer-controls" data-a11y-action-group>
               <button id="home-button" data-a11y-action-id="civil.navigation.home" className="control-button home-control" onClick={reset}><Home size={18}/><span>처음화면</span></button>
               <button id="back-button" data-a11y-action-id="civil.navigation.back" className="control-button back-control" onClick={moveBack} disabled={step === 'main-menu' || step === 'printing' || step === 'complete'}><ArrowLeft size={18}/><span>전화면</span></button>

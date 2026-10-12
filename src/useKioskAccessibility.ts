@@ -27,6 +27,9 @@ type IssueOptions = {
   household: boolean;
 };
 
+const FOOTER_SIMULATION_LABEL_ID = 'civil.footer.simulation-label';
+const FOOTER_PRIVACY_NOTICE_ID = 'civil.footer.privacy-notice';
+
 type AccessibilityState = {
   step: KioskStep;
   options: IssueOptions;
@@ -237,42 +240,57 @@ export function useKioskAccessibility({
           primary: element.classList.contains('confirm-control') || element.classList.contains('primary-button'),
         };
       }),
-      getTextTargets: () => Array.from(root.querySelectorAll<HTMLElement>(
-        [
-          '.screen-content h1',
-          '.screen-content h2',
-          '.screen-content .eyebrow',
-          '.screen-content .note-box',
-          '.screen-content .screen-footnote',
-          '.screen-content .demo-banner',
-          '.screen-content .category-name',
-          '.screen-content [data-a11y-detail]',
-          '.screen-content .page-title > p',
-          '.screen-content .toggle-text > strong',
-          '.screen-content .toggle-choice',
-          '.screen-content .selection-caption > span',
-          '.screen-content .selection-caption > strong',
-          '.screen-content .select-card > strong',
-          '.screen-content .select-action',
-          '.qr-setup-dialog h2',
-          '.qr-setup-dialog [role="status"]',
-        ].join(', '),
-      )).map((element, index) => {
-        const actionId = element.closest<HTMLElement>('[data-a11y-action-id]')?.dataset.a11yActionId;
-        const targetPart = element.hasAttribute('data-a11y-detail')
-          ? 'detail'
-          : element.matches('.toggle-text > strong, .select-card > strong, .category-name')
-            ? 'label'
-            : element.matches('.toggle-choice, .select-action')
-              ? 'state'
-            : `text-${index + 1}`;
-        return {
-          id: actionId
-            ? `${actionId}.${targetPart}`
-            : `civil.${stateRef.current.step}.${targetPart}`,
-          element,
-        };
-      }),
+      getTextTargets: () => {
+        const targets = Array.from(root.querySelectorAll<HTMLElement>(
+          [
+            '.screen-content h1',
+            '.screen-content h2',
+            '.screen-content .eyebrow',
+            '.screen-content .note-box',
+            '.screen-content .screen-footnote',
+            '.screen-content .demo-banner',
+            '.screen-content .category-name',
+            '.screen-content [data-a11y-detail]',
+            '.screen-content .page-title > p',
+            '.screen-content .toggle-text > strong',
+            '.screen-content .toggle-choice',
+            '.screen-content .selection-caption > span',
+            '.screen-content .selection-caption > strong',
+            '.screen-content .select-card > strong',
+            '.screen-content .select-action',
+            '.qr-setup-dialog h2',
+            '.qr-setup-dialog [role="status"]',
+          ].join(', '),
+        )).map((element, index) => {
+          const actionId = element.closest<HTMLElement>('[data-a11y-action-id]')?.dataset.a11yActionId;
+          const targetPart = element.hasAttribute('data-a11y-detail')
+            ? 'detail'
+            : element.matches('.toggle-text > strong, .select-card > strong, .category-name')
+              ? 'label'
+              : element.matches('.toggle-choice, .select-action')
+                ? 'state'
+                : `text-${index + 1}`;
+          return {
+            id: actionId
+              ? `${actionId}.${targetPart}`
+              : `civil.${stateRef.current.step}.${targetPart}`,
+            element,
+          };
+        });
+        const footerLabel = root.querySelector<HTMLElement>('.footer-simulation-label');
+        const privacyNotice = root.querySelector<HTMLElement>('.footer-privacy-notice');
+        if (footerLabel) targets.push({ id: FOOTER_SIMULATION_LABEL_ID, element: footerLabel });
+        if (privacyNotice) targets.push({ id: FOOTER_PRIVACY_NOTICE_ID, element: privacyNotice });
+        return targets;
+      },
+      getFontCorrectionTargets: () => {
+        const footerLabel = root.querySelector<HTMLElement>('.footer-simulation-label');
+        const privacyNotice = root.querySelector<HTMLElement>('.footer-privacy-notice');
+        const targets: Array<{ id: string; element: HTMLElement }> = [];
+        if (footerLabel) targets.push({ id: FOOTER_SIMULATION_LABEL_ID, element: footerLabel });
+        if (privacyNotice) targets.push({ id: FOOTER_PRIVACY_NOTICE_ID, element: privacyNotice });
+        return targets;
+      },
       getLayoutRegions: () => {
         const regions = {
           bottomControls: [root.querySelector<HTMLElement>('[data-a11y-slot="bottom-controls"]')].filter(
@@ -314,13 +332,8 @@ export function useKioskAccessibility({
     });
     sdkRef.current = sdk;
     adapterRef.current = adapter;
-    const profileDockViewportPercent =
-      qrProfileApplied && profile.viewportMode?.mode === 'bottom'
-        ? profile.viewportMode.heightPercent
-        : null;
-    const initialDockViewportPercent = qrProfileApplied
-      ? profileDockViewportPercent
-      : viewportTestEnabled && stateRef.current.step === 'main-menu'
+    const initialDockViewportPercent =
+      !qrProfileApplied && viewportTestEnabled && stateRef.current.step === 'main-menu'
         ? devViewportPercent
         : null;
     const qrDock = createKioskQrDock(
@@ -386,13 +399,8 @@ export function useKioskAccessibility({
     if (!root || !adapter || !sdk) return;
 
     const isHomeScreen = step === 'main-menu';
-    const desiredDockViewportPercent = qrProfileApplied
-      ? profile.viewportMode?.mode === 'bottom'
-        ? profile.viewportMode.heightPercent
-        : null
-      : viewportTestEnabled
-        ? devViewportPercent
-        : null;
+    const desiredDockViewportPercent =
+      !qrProfileApplied && viewportTestEnabled ? devViewportPercent : null;
 
     if (!isHomeScreen) qrDockRef.current?.setActive(false);
 
