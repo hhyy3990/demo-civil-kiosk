@@ -145,6 +145,28 @@ function recordLayoutCheck(
   });
 }
 
+function createKioskQrDock(
+  root: HTMLElement,
+  adapter: AccessibilityAdapter,
+  onOpenQr: () => void,
+  bottomViewportPercent: BottomViewportHeightPercent | null,
+) {
+  return createQrEntryDock({
+    root,
+    adapter,
+    active: false,
+    onOpenQr,
+    label: '내 QR로 화면 설정',
+    theme: {
+      surface: '#e8f0f4',
+      foreground: '#17384d',
+      button: '#176393',
+      buttonForeground: '#ffffff',
+    },
+    bottomViewportPercent: bottomViewportPercent ?? undefined,
+  });
+}
+
 export function useKioskAccessibility({
   rootRef,
   step,
@@ -292,24 +314,21 @@ export function useKioskAccessibility({
     });
     sdkRef.current = sdk;
     adapterRef.current = adapter;
-    const initialDockViewportPercent =
-      viewportTestEnabled && !qrProfileApplied && stateRef.current.step === 'main-menu'
+    const profileDockViewportPercent =
+      qrProfileApplied && profile.viewportMode?.mode === 'bottom'
+        ? profile.viewportMode.heightPercent
+        : null;
+    const initialDockViewportPercent = qrProfileApplied
+      ? profileDockViewportPercent
+      : viewportTestEnabled && stateRef.current.step === 'main-menu'
         ? devViewportPercent
         : null;
-    const qrDock = createQrEntryDock({
-      root: sdkRoot,
+    const qrDock = createKioskQrDock(
+      sdkRoot,
       adapter,
-      active: false,
-      onOpenQr: () => onOpenQrRef.current(),
-      label: '내 QR로 화면 설정',
-      theme: {
-        surface: '#e8f0f4',
-        foreground: '#17384d',
-        button: '#176393',
-        buttonForeground: '#ffffff',
-      },
-      bottomViewportPercent: initialDockViewportPercent ?? undefined,
-    });
+      () => onOpenQrRef.current(),
+      initialDockViewportPercent,
+    );
     qrDockRef.current = qrDock;
     qrDockViewportPercentRef.current = initialDockViewportPercent;
     qrDock.setActive(stateRef.current.step === 'main-menu');
@@ -367,27 +386,24 @@ export function useKioskAccessibility({
     if (!root || !adapter || !sdk) return;
 
     const isHomeScreen = step === 'main-menu';
-    const desiredDockViewportPercent =
-      isHomeScreen && viewportTestEnabled && !qrProfileApplied ? devViewportPercent : null;
+    const desiredDockViewportPercent = qrProfileApplied
+      ? profile.viewportMode?.mode === 'bottom'
+        ? profile.viewportMode.heightPercent
+        : null
+      : viewportTestEnabled
+        ? devViewportPercent
+        : null;
 
     if (!isHomeScreen) qrDockRef.current?.setActive(false);
 
-    if (desiredDockViewportPercent !== qrDockViewportPercentRef.current) {
+    if (!qrModalOpen && desiredDockViewportPercent !== qrDockViewportPercentRef.current) {
       qrDockRef.current?.destroy();
-      const nextDock = createQrEntryDock({
+      const nextDock = createKioskQrDock(
         root,
         adapter,
-        active: false,
-        onOpenQr: () => onOpenQrRef.current(),
-        label: '내 QR로 화면 설정',
-        theme: {
-          surface: '#e8f0f4',
-          foreground: '#17384d',
-          button: '#176393',
-          buttonForeground: '#ffffff',
-        },
-        bottomViewportPercent: desiredDockViewportPercent ?? undefined,
-      });
+        () => onOpenQrRef.current(),
+        desiredDockViewportPercent,
+      );
       qrDockRef.current = nextDock;
       qrDockViewportPercentRef.current = desiredDockViewportPercent;
     }
@@ -406,7 +422,7 @@ export function useKioskAccessibility({
         sdk.setViewportMode(mode);
       }
     }
-  }, [devViewportPercent, qrProfileApplied, rootRef, step, viewportTestEnabled]);
+  }, [devViewportPercent, profile, qrModalOpen, qrProfileApplied, rootRef, step, viewportTestEnabled]);
 
   useEffect(() => {
     const sdk = sdkRef.current;
