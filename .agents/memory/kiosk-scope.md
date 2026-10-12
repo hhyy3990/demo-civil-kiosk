@@ -56,3 +56,9 @@ At 1440×900, the v3 bottom-viewport 80% profile places `.stage` at y=166..828 w
 **Why:** Replit Preview measurements showed the heading's position barely changed when the profile moved the stage boundary, while the host shell retained its minimum height. The same clipping did not occur in the no-profile baseline.
 
 **How to apply:** Test active bottom-viewport profiles at wide desktop sizes. Compare the stage and heading bounds and hit-test the heading before attributing clipping to screen-change scrolling. Do not add host-only scroll resets or CSS workarounds; determine whether a reusable SDK contract or host-layout change is appropriate first.
+
+The SDK bottom viewport and QR-entry dock are configured separately. If the host applies a profile viewport but does not pass its `bottomViewportPercent` when creating/recreating the dock, the dock remains in home mode and its pseudo-element can reserve the dock plus controls again.
+
+**Why:** In the kiosk, a 60% profile set the stage bottom inset to 165px while the dock's pseudo-element independently added 165px to `scrollHeight`; the same SDK's viewport-test path passed the dock option and produced a 0px pseudo-element.
+
+**How to apply:** When profile viewport settings change, synchronize the dock's creation option as well as the SDK viewport; the current dock controller has no setter, so recreation may be needed. Compare actual scrollHeight with the pseudo-element temporarily zeroed, then restored, before classifying this as an SDK-wide defect.
