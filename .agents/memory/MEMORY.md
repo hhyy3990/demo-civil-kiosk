@@ -1,3 +1,4 @@
 - [Kiosk scope](kiosk-scope.md) — measure actual scroll owners; bottom profiles can clip an oversized, centered machine on wide screens.
 - [Local SDK Vite cache](local-sdk-vite-cache.md) — after a local SDK tarball update, clear stale optimized dependencies before browser verification.
 - [Browser input readiness](browser-input-readiness.md) — wait for controlled form state in CDP tests instead of assuming text insertion updates React immediately.
+- [Smart guide step contract](smart-guide-step-contract.md) — use stable business step IDs; distinguish same-step state updates from real idle interaction resets and viewport placement limits.

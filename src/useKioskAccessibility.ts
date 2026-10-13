@@ -54,7 +54,12 @@ type UseKioskAccessibilityOptions = {
   devViewportPercent: BottomViewportHeightPercent | null;
 };
 
-const guideByStep: Record<KioskStep, { title: string; text: string; actionId: string } | null> = {
+const guideByStep: Record<KioskStep, {
+  title: string;
+  text: string;
+  actionId: string;
+  stepId?: string;
+} | null> = {
   'main-menu': {
     title: '증명서 선택',
     text: '등본 발급을 원하시면 주민등록 버튼을 눌러 주세요.',
@@ -66,8 +71,9 @@ const guideByStep: Record<KioskStep, { title: string; text: string; actionId: st
     actionId: 'civil.document.copy',
   },
   'resident-number': {
-    title: '번호 입력',
-    text: '임의의 숫자 13자리를 입력한 다음 확인을 눌러 주세요.',
+    stepId: 'certificate.id-input',
+    title: '번호를 입력해 주세요',
+    text: '화면의 숫자 버튼을 눌러 시뮬레이션용 임의 숫자 13자리를 입력한 뒤 확인을 눌러 주세요.',
     actionId: 'civil.resident-number.confirm',
   },
   fingerprint: {
@@ -76,8 +82,9 @@ const guideByStep: Record<KioskStep, { title: string; text: string; actionId: st
     actionId: 'civil.fingerprint.confirm',
   },
   options: {
-    title: '발급 옵션',
-    text: '표시할 항목을 확인한 뒤 확인을 눌러 주세요.',
+    stepId: 'certificate.display-options',
+    title: '표시할 항목을 골라 주세요',
+    text: '증명서에 표시할 내용을 확인하고 필요한 항목을 선택한 뒤 하단 확인을 눌러 주세요.',
     actionId: 'civil.options.confirm',
   },
   'fee-waiver': {
@@ -86,13 +93,15 @@ const guideByStep: Record<KioskStep, { title: string; text: string; actionId: st
     actionId: 'civil.fee-waiver.standard',
   },
   copies: {
-    title: '발급 부수',
-    text: '발급할 부수를 선택한 뒤 확인을 눌러 주세요.',
+    stepId: 'certificate.copy-count',
+    title: '발급할 부수를 정해 주세요',
+    text: '필요한 증명서 부수를 선택하고 하단 확인을 눌러 주세요.',
     actionId: 'civil.copies.confirm',
   },
   payment: {
-    title: '결제 방법',
-    text: '시뮬레이션 결제 방법을 선택해 주세요.',
+    stepId: 'certificate.payment-method',
+    title: '결제 방법을 선택해 주세요',
+    text: '신용·체크카드 버튼을 눌러 가상 결제 시뮬레이션을 진행해 주세요.',
     actionId: 'civil.payment.card',
   },
   printing: null,
@@ -455,10 +464,13 @@ export function useKioskAccessibility({
     const guide = guideByStep[step];
     const paused = qrModalOpen || noticeOpen;
     sdk.setGuideState({
+      stepId: guide?.stepId,
       enabled: profile.smartGuide,
       paused,
       delaySeconds: profile.guideDelaySeconds,
-      message: guide ? { ...guide } : null,
+      message: guide
+        ? { title: guide.title, text: guide.text, actionId: guide.actionId }
+        : null,
     });
     const spokenPrompts: Record<KioskStep, string> = {
       'main-menu': '증명서를 선택해 주세요. 주민등록을 선택하면 주민등록표 등본 발급을 시작합니다.',
