@@ -51,6 +51,12 @@ In a 360×667 bottom-viewport layout, do not treat the stage's absolute maximum 
 
 **How to apply:** Check the last tile's real bounds and `elementFromPoint` hit target during user-driven scrolling, not only at scrollTop zero or maximum. Report any fixed-region overlap separately and avoid a host layout workaround unless requested.
 
+At 390×844 with large text, large controls, and high contrast, layout diagnostics can still flag certificate tiles 15–18 beneath the QR dock/footer. The SDK's grid, action-group, and scroll-space corrections may roll back, while a real wheel scroll still reaches and activates tile 18.
+
+**Why:** Replit Preview measurements showed nine remaining diagnostic issues after the attempted corrections, but the scroll hint disappeared at the bottom and a real click on the final certificate opened its demo notice.
+
+**How to apply:** Report initial-position diagnostics and post-scroll reachability separately. A successful final-tile click does not mean the initial overlaps were corrected, and rolled-back SDK strategies should not be reported as applied fixes.
+
 At wide desktop sizes, unsafe vertical centering can place an oversized kiosk shell above `.stage`'s scroll origin. `safe center` preserves centering when the shell fits and aligns it from the start when it does not. The SDK bottom-viewport mode already uses safe centering; the remaining issue is the host's normal desktop alignment.
 
 **Why:** Actual Replit Preview measurements at 1440×900 found the unprofiled machine frame at y=-14.5 and the large-text v3-null header at y=-7.78 while `.stage.scrollTop` was 0. A one-property safe-alignment experiment moved the machine to y=50 and the header to y=104; the SDK-owned bottom modes already kept the header visible.
