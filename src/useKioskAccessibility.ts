@@ -105,11 +105,7 @@ const guideByStep: Record<KioskStep, {
     actionId: 'civil.payment.card',
   },
   printing: null,
-  complete: {
-    title: '발급 완료',
-    text: '처음 화면으로 돌아가려면 처음 화면 버튼을 눌러 주세요.',
-    actionId: 'civil.complete.home',
-  },
+  complete: null,
 };
 
 const primaryActionIdsByStep: Partial<Record<KioskStep, readonly string[]>> = {
@@ -118,7 +114,7 @@ const primaryActionIdsByStep: Partial<Record<KioskStep, readonly string[]>> = {
   fingerprint: ['fingerprint-confirm-button'],
   'fee-waiver': ['fee-waiver-yes-button', 'fee-waiver-no-button'],
   payment: ['payment-card-button', 'payment-cash-button'],
-  complete: ['complete-home-button'],
+  complete: ['completion-extend-button', 'complete-home-button'],
 };
 
 type LayoutCorrections = ReturnType<AccessibilitySdk['getLastLayoutCorrections']>;
@@ -465,8 +461,8 @@ export function useKioskAccessibility({
     const paused = qrModalOpen || noticeOpen;
     sdk.setGuideState({
       stepId: guide?.stepId,
-      enabled: profile.smartGuide,
-      paused,
+      enabled: profile.smartGuide && step !== 'complete',
+      paused: paused || step === 'complete',
       delaySeconds: profile.guideDelaySeconds,
       message: guide
         ? { title: guide.title, text: guide.text, actionId: guide.actionId }

@@ -1,9 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { ArrowLeft, Check, Home, Info } from 'lucide-react';
 import {
+  DEFAULT_COMPLETION_SECONDS,
   DEFAULT_ACCESSIBILITY_PROFILE,
   type AccessibilityProfile,
   type BottomViewportHeightPercent,
+  type CompletionState,
 } from '@naebangsik/kiosk-accessibility-sdk';
 import {
   CompleteScreen,
@@ -38,6 +40,12 @@ function App() {
   const [options, setOptions] = useState<IssueOptions>({ address: true, history: false, household: false });
   const [feeExempt, setFeeExempt] = useState(false);
   const [copies, setCopies] = useState(1);
+  const [completionState, setCompletionState] = useState<CompletionState>({
+    active: false,
+    returning: false,
+    remainingSeconds: 0,
+    error: false,
+  });
   const [notice, setNotice] = useState('');
   const [printingProgress, setPrintingProgress] = useState(false);
   const [qrModalOpen, setQrModalOpen] = useState(false);
@@ -100,15 +108,47 @@ function App() {
     viewportTestEnabled: showViewportTestControls,
     devViewportPercent,
   });
-  const reset = () => {
-    setStep('main-menu'); setResidentNumber(''); setOptions({ address: true, history: false, household: false });
-    setFeeExempt(false); setCopies(1); setPrintingProgress(false); setNotice('');
-    setQrModalOpen(false);
-    setAccessibilityProfile({ ...DEFAULT_ACCESSIBILITY_PROFILE });
-    setQrProfileApplied(false);
-    setDevViewportPercent(null);
-    accessibilitySdkRef.current?.endSession();
-  };
+  const reset = useCallback(() => {
+    try {
+      setResidentNumber('');
+      setOptions({ address: true, history: false, household: false });
+      setFeeExempt(false);
+      setCopies(1);
+      setPrintingProgress(false);
+      setNotice('');
+      setQrModalOpen(false);
+      setAccessibilityProfile({ ...DEFAULT_ACCESSIBILITY_PROFILE });
+      setQrProfileApplied(false);
+      setDevViewportPercent(null);
+      accessibilitySdkRef.current?.endSession();
+      setStep('main-menu');
+      return true;
+    } catch {
+      return false;
+    }
+  }, [accessibilitySdkRef]);
+  const handleHome = useCallback(() => {
+    const sdk = accessibilitySdkRef.current;
+    if (step === 'complete' && sdk?.completionState.active) {
+      if (!sdk.completionState.returning) void sdk.finishCompletion();
+      return;
+    }
+    if (!reset()) setNotice('세션 초기화에 실패했습니다. 현재 화면에서 다시 시도해 주세요.');
+  }, [accessibilitySdkRef, reset, step]);
+  const extendCompletion = useCallback(() => {
+    accessibilitySdkRef.current?.extendCompletion();
+  }, [accessibilitySdkRef]);
+  useEffect(() => {
+    const sdk = accessibilitySdkRef.current;
+    if (!sdk) return;
+    return sdk.subscribeCompletion(setCompletionState);
+  }, [accessibilitySdkRef]);
+  useEffect(() => {
+    const sdk = accessibilitySdkRef.current;
+    if (!sdk || step !== 'complete') return;
+    sdk.beginCompletion(() => reset());
+    return () => sdk.cancelCompletion();
+  }, [accessibilitySdkRef, reset, step]);
   const registerSessionCleanup = useCallback((cleanup: () => void) => (
     accessibilitySdkRef.current?.registerSessionCleanup(cleanup) ?? (() => undefined)
   ), []);
@@ -149,13 +189,23 @@ function App() {
             {step === 'copies' && <CopiesScreen copies={copies} feeExempt={feeExempt} onCopiesChange={setCopies}/>}
             {step === 'payment' && <PaymentScreen copies={copies} total={total} feeExempt={feeExempt} optionLabel={optionLabel} onPayment={startPrint}/>}
             {step === 'printing' && <PrintingScreen active={printingProgress}/>}
-            {step === 'complete' && <CompleteScreen copies={copies} total={total} feeExempt={feeExempt} onHome={reset}/>}
+            {step === 'complete' && <CompleteScreen
+              copies={copies}
+              total={total}
+              feeExempt={feeExempt}
+              remainingSeconds={completionState.active ? completionState.remainingSeconds : DEFAULT_COMPLETION_SECONDS}
+              active={completionState.active}
+              returning={completionState.returning}
+              error={completionState.error}
+              onExtend={extendCompletion}
+              onHome={handleHome}
+            />}
           </div>
 
           <footer className="device-footer" data-a11y-slot="bottom-controls">
             <div className="footer-service"><span className="footer-led" /> <span className="footer-simulation-label">민원 발급 시뮬레이션</span> <span className="footer-separator"/> <span className="footer-privacy-notice">실제 신청 정보는 저장되지 않습니다</span></div>
             <div className="footer-controls" data-a11y-action-group>
-              <button id="home-button" data-a11y-action-id="civil.navigation.home" className="control-button home-control" onClick={reset}><Home size={18}/><span>처음화면</span></button>
+              <button id="home-button" data-a11y-action-id="civil.navigation.home" className="control-button home-control" onClick={handleHome} disabled={step === 'complete' && completionState.returning}><Home size={18}/><span>처음화면</span></button>
               <button id="back-button" data-a11y-action-id="civil.navigation.back" className="control-button back-control" onClick={moveBack} disabled={step === 'main-menu' || step === 'printing' || step === 'complete'}><ArrowLeft size={18}/><span>전화면</span></button>
               {(step === 'resident-number' || step === 'copies') && <button id="next-confirm-button" data-a11y-action-id={step === 'resident-number' ? 'civil.resident-number.confirm' : 'civil.copies.confirm'} className="control-button confirm-control" onClick={confirm}><Check size={19}/><span>확인</span></button>}
               {step === 'options' && <button id="next-confirm-button" data-a11y-action-id="civil.options.confirm" className="control-button confirm-control" onClick={() => setStep('fee-waiver')}><Check size={19}/><span>확인</span></button>}

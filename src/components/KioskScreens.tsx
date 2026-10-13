@@ -139,13 +139,55 @@ export function PrintingScreen({ active }: { active: boolean }) {
   );
 }
 
-export function CompleteScreen({ copies, total, feeExempt, onHome }: { copies: number; total: number; feeExempt: boolean; onHome: () => void }) {
+export function CompleteScreen({
+  copies,
+  total,
+  feeExempt,
+  remainingSeconds,
+  active,
+  returning,
+  error,
+  onExtend,
+  onHome,
+}: {
+  copies: number;
+  total: number;
+  feeExempt: boolean;
+  remainingSeconds: number;
+  active: boolean;
+  returning: boolean;
+  error: boolean;
+  onExtend: () => void;
+  onHome: () => void;
+}) {
   return (
     <section className="screen-view centered-view complete-view">
       <div className="complete-mark"><Check size={48}/></div><p className="eyebrow">발급 완료</p><h1>발급이 완료되었습니다.</h1><p className="center-sub">증명서 출력구에서 서류를 받아 주세요.</p>
       <div className="completion-slip"><span>주민등록표(등본)</span><strong>{copies}부 발급</strong><span>{feeExempt ? '수수료 면제' : `${total.toLocaleString('ko-KR')}원`}</span></div>
       <div className="note-box" data-a11y-detail><Info size={17}/><span>실제 문서는 출력되지 않는 시뮬레이션 화면입니다.</span></div>
-      <button id="complete-home-button" data-a11y-action-id="civil.complete.home" className="primary-button completion-home" onClick={onHome}><Home size={18}/> 처음 화면으로</button>
+      <p className={`completion-countdown ${error ? 'completion-countdown-error' : ''}`} data-a11y-detail role={error ? 'alert' : 'status'} aria-live="polite" aria-atomic="true">
+        {error ? '자동 복귀에 실패했습니다. 처음 화면으로 다시 시도해 주세요.' : returning ? '처음 화면으로 돌아가고 있습니다.' : `${remainingSeconds}초 후 처음 화면으로 돌아갑니다.`}
+      </p>
+      <div className="completion-actions" data-a11y-action-group>
+        <button
+          id="completion-extend-button"
+          data-a11y-action-id="civil.complete.extend"
+          className="completion-extend"
+          onClick={onExtend}
+          disabled={!active || returning}
+        >
+          시간 연장
+        </button>
+        <button
+          id="complete-home-button"
+          data-a11y-action-id="civil.complete.home"
+          className="primary-button completion-home"
+          onClick={onHome}
+          disabled={returning}
+        >
+          <Home size={18}/> 처음 화면으로
+        </button>
+      </div>
     </section>
   );
 }

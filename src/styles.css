@@ -64,3 +64,15 @@
   .machine-bottom {display:none}
 }
 @media (max-width: 360px) { .category-button {min-height:55px}.category-name {font-size:9px}.category-number {display:none}.footer-service {font-size:7px}.footer-separator {margin:0}.control-button {min-width:75px} }
+.completion-countdown {width:min(100%,380px);margin:13px 0 0;padding:10px 12px;border-left:3px solid #176393;background:#e8f0f4;color:#20475f;font-size:13px;font-weight:700;line-height:1.5;text-align:left}
+.completion-countdown-error {border-left-color:#9b3030;background:#f7e8e8;color:#7b2525}
+.completion-actions {display:flex;flex-wrap:wrap;justify-content:center;gap:9px;width:min(100%,380px);margin-top:12px}
+.completion-actions button {display:flex;align-items:center;justify-content:center;gap:8px;flex:1 1 155px;min-height:48px;padding:10px 16px;font-size:12px;font-weight:700;cursor:pointer}
+.completion-extend {border:1px solid #6c8f9e;background:#e8f0f3;color:#20475f}
+.completion-extend:hover {background:#dce9ee}
+.completion-actions button:disabled {cursor:default;opacity:.58}
+.completion-home {margin-top:0}
+@media (max-width: 520px) {
+  .completion-actions {flex-direction:column}
+  .completion-actions button {width:100%;flex:auto;min-height:48px}
+}
