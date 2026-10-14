@@ -49,7 +49,7 @@ type UseKioskAccessibilityOptions = {
   qrModalOpen: boolean;
   noticeOpen: boolean;
   profile: AccessibilityProfile;
-  qrProfileApplied: boolean;
+  accessibilityProfileApplied: boolean;
   onOpenQr: () => void;
   viewportTestEnabled: boolean;
   devViewportPercent: BottomViewportHeightPercent | null;
@@ -278,7 +278,7 @@ export function useKioskAccessibility({
   qrModalOpen,
   noticeOpen,
   profile,
-  qrProfileApplied,
+  accessibilityProfileApplied,
   onOpenQr,
   viewportTestEnabled,
   devViewportPercent,
@@ -397,7 +397,8 @@ export function useKioskAccessibility({
           ? Array.from(root.querySelectorAll<HTMLElement>(primaryActionSelector))
           : [];
         const guidanceAvoidAreas = (guidanceAvoidSelectorsByStep[state.step] ?? [])
-          .flatMap((selector) => Array.from(root.querySelectorAll<HTMLElement>(selector)));
+          .flatMap((selector) => Array.from(root.querySelectorAll<HTMLElement>(selector)))
+          .concat(Array.from(root.querySelectorAll<HTMLElement>('.dev-experience-strip')));
         const regions = {
           bottomControls: [root.querySelector<HTMLElement>('[data-a11y-slot="bottom-controls"]')].filter(
             (element): element is HTMLElement => Boolean(element),
@@ -434,7 +435,7 @@ export function useKioskAccessibility({
     sdkRef.current = sdk;
     adapterRef.current = adapter;
     const initialDockViewportPercent =
-      !qrProfileApplied && viewportTestEnabled && stateRef.current.step === 'main-menu'
+      !accessibilityProfileApplied && viewportTestEnabled && stateRef.current.step === 'main-menu'
         ? devViewportPercent
         : null;
     const qrDock = createKioskQrDock(
@@ -499,7 +500,7 @@ export function useKioskAccessibility({
 
     const isHomeScreen = step === 'main-menu';
     const desiredDockViewportPercent =
-      !qrProfileApplied && viewportTestEnabled ? devViewportPercent : null;
+      !accessibilityProfileApplied && viewportTestEnabled ? devViewportPercent : null;
 
     if (!isHomeScreen) qrDockRef.current?.setActive(false);
 
@@ -519,7 +520,7 @@ export function useKioskAccessibility({
       qrDockRef.current?.setActive(true);
     }
 
-    if (!qrProfileApplied) {
+    if (!accessibilityProfileApplied) {
       if (isHomeScreen) {
         sdk.setViewportMode(null);
       } else {
@@ -529,7 +530,7 @@ export function useKioskAccessibility({
         sdk.setViewportMode(mode);
       }
     }
-  }, [devViewportPercent, profile, qrModalOpen, qrProfileApplied, rootRef, step, viewportTestEnabled]);
+  }, [accessibilityProfileApplied, devViewportPercent, profile, qrModalOpen, rootRef, step, viewportTestEnabled]);
 
   useEffect(() => {
     const sdk = sdkRef.current;

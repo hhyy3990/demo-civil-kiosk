@@ -27,6 +27,23 @@ import '@naebangsik/kiosk-accessibility-sdk/styles.css';
 import './styles.css';
 
 const steps: KioskStep[] = ['main-menu', 'resident-type', 'resident-number', 'fingerprint', 'options', 'fee-waiver', 'copies', 'payment', 'printing', 'complete'];
+const DEV_ACCESSIBILITY_EXPERIENCE_PROFILE: AccessibilityProfile | null = import.meta.env.DEV
+  ? {
+      ...DEFAULT_ACCESSIBILITY_PROFILE,
+      textSize: 'extraLarge',
+      buttonSize: 'large',
+      contrast: 'high',
+      easyLanguage: true,
+      viewportMode: { mode: 'bottom', heightPercent: 60 },
+      smartGuide: true,
+      guideDelaySeconds: 10,
+      voiceGuidance: false,
+      language: 'ko',
+      stepByStepGuidance: false,
+      conciseGuidance: false,
+      slowGuidance: true,
+    }
+  : null;
 const stepNames: Record<KioskStep, string> = {
   'main-menu': '증명서 선택', 'resident-type': '문서 종류', 'resident-number': '번호 입력',
   fingerprint: '본인 확인', options: '발급 옵션', 'fee-waiver': '수수료 면제', copies: '발급 부수',
@@ -50,10 +67,14 @@ function App() {
   const [printingProgress, setPrintingProgress] = useState(false);
   const [qrModalOpen, setQrModalOpen] = useState(false);
   const [accessibilityProfile, setAccessibilityProfile] = useState<AccessibilityProfile>({ ...DEFAULT_ACCESSIBILITY_PROFILE });
-  const [qrProfileApplied, setQrProfileApplied] = useState(false);
+  const [accessibilityProfileApplied, setAccessibilityProfileApplied] = useState(false);
+  const [devAccessibilityExperienceActive, setDevAccessibilityExperienceActive] = useState(false);
   const [devViewportPercent, setDevViewportPercent] = useState<BottomViewportHeightPercent | null>(null);
   const showViewportTestControls = import.meta.env.DEV
     && new URLSearchParams(window.location.search).get('viewport-test') === '1';
+  const showDevAccessibilityExperience = import.meta.env.DEV
+    && !accessibilityProfileApplied
+    && !devAccessibilityExperienceActive;
   const openQrModal = useCallback(() => setQrModalOpen(true), []);
   const closeQrModal = useCallback(() => setQrModalOpen(false), []);
 
@@ -103,7 +124,7 @@ function App() {
     qrModalOpen,
     noticeOpen: Boolean(notice),
     profile: accessibilityProfile,
-    qrProfileApplied,
+    accessibilityProfileApplied,
     onOpenQr: openQrModal,
     viewportTestEnabled: showViewportTestControls,
     devViewportPercent,
@@ -118,7 +139,8 @@ function App() {
       setNotice('');
       setQrModalOpen(false);
       setAccessibilityProfile({ ...DEFAULT_ACCESSIBILITY_PROFILE });
-      setQrProfileApplied(false);
+      setAccessibilityProfileApplied(false);
+      setDevAccessibilityExperienceActive(false);
       setDevViewportPercent(null);
       accessibilitySdkRef.current?.endSession();
       setStep('main-menu');
@@ -155,16 +177,42 @@ function App() {
   const createSessionGuard = useCallback(() => (
     accessibilitySdkRef.current?.createSessionGuard() ?? (() => true)
   ), []);
-  const applyAccessibilityProfile = useCallback((profile: AccessibilityProfile) => {
+  const applyAccessibilityProfile = useCallback((
+    profile: AccessibilityProfile,
+    isDevelopmentExperience = false,
+  ) => {
+    if (isDevelopmentExperience && !import.meta.env.DEV) return;
     setAccessibilityProfile(profile);
-    setQrProfileApplied(true);
+    setAccessibilityProfileApplied(true);
+    setDevAccessibilityExperienceActive(isDevelopmentExperience);
     setDevViewportPercent(profile.viewportMode?.heightPercent ?? null);
-    setNotice('내 방식 QR의 접근성 설정을 적용했습니다.');
+    setNotice(isDevelopmentExperience ? '' : '내 방식 QR의 접근성 설정을 적용했습니다.');
   }, []);
+  const startDevAccessibilityExperience = useCallback(() => {
+    const profile = DEV_ACCESSIBILITY_EXPERIENCE_PROFILE;
+    if (
+      !import.meta.env.DEV
+      || !profile
+      || step !== 'main-menu'
+      || accessibilityProfileApplied
+      || qrModalOpen
+    ) return;
+    setResidentNumber('');
+    setOptions({ address: true, history: false, household: false });
+    setFeeExempt(false);
+    setCopies(1);
+    setPrintingProgress(false);
+    setNotice('');
+    applyAccessibilityProfile(profile, true);
+  }, [accessibilityProfileApplied, applyAccessibilityProfile, qrModalOpen, step]);
+  const endDevAccessibilityExperience = useCallback(() => {
+    if (!import.meta.env.DEV || !devAccessibilityExperienceActive) return;
+    if (!reset()) setNotice('체험 세션을 종료하지 못했습니다. 다시 시도해 주세요.');
+  }, [devAccessibilityExperienceActive, reset]);
   const setDevViewportMode = useCallback((heightPercent: BottomViewportHeightPercent | null) => {
-    if (!import.meta.env.DEV || qrProfileApplied) return;
+    if (!import.meta.env.DEV || accessibilityProfileApplied) return;
     setDevViewportPercent(heightPercent);
-  }, [qrProfileApplied]);
+  }, [accessibilityProfileApplied]);
 
   return (
     <>
@@ -177,10 +225,29 @@ function App() {
             <div className="service-brand"><span className="brand-seal" aria-hidden="true">민</span><div><strong>무인민원발급</strong><small>민원서류 발급 서비스</small></div></div>
             <div className="header-right"><span className="clock">{new Date().toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit', hour12: false })}</span><span className="header-rule" /><span className="step-count">{step === 'main-menu' ? '처음 화면' : `${steps.indexOf(step)} / 9 단계`}</span></div>
           </header>
+          {import.meta.env.DEV && devAccessibilityExperienceActive && (
+            <div className="dev-experience-strip" role="status" aria-live="polite" data-dev-accessibility-experience="active">
+              <strong>접근성 체험 중</strong>
+              <button
+                id="dev-experience-exit"
+                type="button"
+                data-a11y-action-id="civil.dev-accessibility-experience.exit"
+                onClick={endDevAccessibilityExperience}
+              >
+                체험 종료
+              </button>
+            </div>
+          )}
           {step !== 'main-menu' && <div className="progress-rail" aria-label={`진행 단계 ${stepNames[step]}`}><div style={{ width: `${Math.min(100, (steps.indexOf(step) / 9) * 100)}%` }} /></div>}
 
           <div className="screen-content" key={step} data-screen={step} data-a11y-slot="scroll-content" data-a11y-reflow>
-            {step === 'main-menu' && <MainMenuScreen onSelectCategory={selectCategory}/>}
+            {step === 'main-menu' && (
+              <MainMenuScreen
+                onSelectCategory={selectCategory}
+                showDevAccessibilityExperience={showDevAccessibilityExperience}
+                onStartDevAccessibilityExperience={startDevAccessibilityExperience}
+              />
+            )}
             {step === 'resident-type' && <ResidentTypeScreen onSelectCopy={() => setStep('resident-number')} onUnavailable={() => setNotice('주민등록표(초본)은 현재 준비 중입니다. 데모에서는 등본 발급을 이용해 주십시오.')}/>}
             {step === 'resident-number' && <ResidentNumberScreen residentNumber={residentNumber} onDigit={addDigit} onClear={() => setResidentNumber('')} onCorrect={() => setResidentNumber((old) => old.slice(0, -1))}/>}
             {step === 'fingerprint' && <FingerprintScreen onConfirm={() => setStep('options')}/>}
@@ -254,7 +321,7 @@ function App() {
       <BottomViewportTestControls
         activePercent={devViewportPercent}
         onSelect={setDevViewportMode}
-        disabled={qrProfileApplied}
+        disabled={accessibilityProfileApplied}
       />
     )}
     </>

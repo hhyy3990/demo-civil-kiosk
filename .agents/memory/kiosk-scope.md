@@ -68,3 +68,9 @@ SDK v0.5.6 synchronizes QR v3 `viewportMode` to the existing QR-entry dock inter
 **Why:** Replit Preview tests applied v3 null/60/70/80 modes through one dock node; the SDK updated viewport state without creating duplicate docks. `endSession()` returned to one default dock.
 
 **How to apply:** Create one dock and let SDK profile application synchronize its viewport. Verify dock count and identity during profile changes, retain only the no-profile developer override, and confirm one default dock after session end.
+
+For browser scroll tests, position wheel input inside the measured active scroll owner's bounds rather than at the viewport edge.
+
+**Why:** At 390px viewport width the centered kiosk stage was narrower than the viewport, so a test wheel sent to `innerWidth - 4` missed the stage and falsely looked like a scroll failure.
+
+**How to apply:** Read the active owner's `getBoundingClientRect()` and send wheel/touch input within that rectangle; verify both `scrollTop` and the target's hit-test after scrolling.

@@ -12,7 +12,15 @@ const certificateCategories = [
   '국세증명', '건강보험', '고용·산재보험', '여권', '국민연금', '교통(경찰청)',
 ];
 
-export function MainMenuScreen({ onSelectCategory }: { onSelectCategory: (category: string) => void }) {
+export function MainMenuScreen({
+  onSelectCategory,
+  showDevAccessibilityExperience,
+  onStartDevAccessibilityExperience,
+}: {
+  onSelectCategory: (category: string) => void;
+  showDevAccessibilityExperience: boolean;
+  onStartDevAccessibilityExperience: () => void;
+}) {
   return (
     <section className="screen-view main-view">
       <div className="title-band">
@@ -20,6 +28,22 @@ export function MainMenuScreen({ onSelectCategory }: { onSelectCategory: (catego
         <div className="main-title-copy"><h1>발급을 원하시는 증명서를<br className="main-title-mobile-break"/>선택하십시오.</h1><p data-a11y-detail>원하는 민원서류를 선택해 주십시오.</p></div>
       </div>
       <div className="demo-banner"><span className="demo-tag">데모 버전 안내</span><span>현재 주민등록등본 발급 기능만 제공됩니다.</span></div>
+      {import.meta.env.DEV && showDevAccessibilityExperience && (
+        <button
+          id="dev-accessibility-experience-button"
+          type="button"
+          data-a11y-action-id="civil.dev-accessibility-experience.start"
+          className="dev-accessibility-experience-button"
+          aria-describedby="dev-accessibility-experience-description"
+          onClick={onStartDevAccessibilityExperience}
+        >
+          <span className="dev-accessibility-experience-copy">
+            <strong>접근성 체험하기</strong>
+            <small id="dev-accessibility-experience-description">QR 없이 큰 글씨와 쉬운 안내를 체험해 보세요.</small>
+          </span>
+          <ChevronRight size={18} aria-hidden="true" />
+        </button>
+      )}
       <div className="certificate-grid" aria-label="증명서 종류" data-a11y-grid>
         {certificateCategories.map((category, index) => <button key={category} id={index === 0 ? 'main-resident-button' : `certificate-category-${index + 1}`} data-a11y-action-id={`civil.certificate.${String(index + 1).padStart(2, '0')}`} data-a11y-menu-item className={`category-button ${index === 0 ? 'category-active' : ''}`} onClick={() => onSelectCategory(category)}>
           <span className="category-number">{String(index + 1).padStart(2, '0')}</span><span className="category-name">{category}</span><ChevronRight size={16} className="category-arrow" />
