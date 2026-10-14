@@ -5,6 +5,7 @@ import {
   type AccessibilityAdapter,
   type AccessibilityProfile,
   type AccessibilitySdk,
+  type EasyLanguageExplanation,
   type BottomViewportHeightPercent,
   type QrEntryDockController,
 } from '@naebangsik/kiosk-accessibility-sdk';
@@ -108,16 +109,109 @@ const guideByStep: Record<KioskStep, {
   complete: null,
 };
 
-const primaryActionIdsByStep: Partial<Record<KioskStep, readonly string[]>> = {
-  'main-menu': ['main-resident-button'],
-  'resident-type': ['resident-register-copy-button'],
-  fingerprint: ['fingerprint-confirm-button'],
-  'fee-waiver': ['fee-waiver-yes-button', 'fee-waiver-no-button'],
-  payment: ['payment-card-button', 'payment-cash-button'],
-  complete: ['completion-extend-button', 'complete-home-button'],
+const primaryActionSelectorsByStep: Partial<Record<KioskStep, string>> = {
+  'main-menu': '#main-resident-button',
+  'resident-type': '#resident-register-copy-button',
+  'resident-number': '.keypad button, #next-confirm-button',
+  fingerprint: '#fingerprint-confirm-button',
+  options: '.option-list button, #next-confirm-button',
+  'fee-waiver': '#fee-waiver-yes-button, #fee-waiver-no-button',
+  copies: '.copies-control button, .copies-numbers button, #next-confirm-button',
+  payment: '.payment-options button',
+  complete: '#completion-extend-button, #complete-home-button',
 };
 
 type LayoutCorrections = ReturnType<AccessibilitySdk['getLastLayoutCorrections']>;
+
+const guidanceAvoidSelectorsByStep: Partial<Record<KioskStep, readonly string[]>> = {
+  'resident-type': ['.type-choice-list'],
+  'resident-number': ['.number-display', '.keypad'],
+  fingerprint: ['.fingerprint-panel', '.inline-action'],
+  options: ['.option-list'],
+  'fee-waiver': ['.waiver-grid'],
+  copies: ['.copies-control', '.copies-numbers'],
+  payment: ['.application-summary', '.payment-options'],
+  complete: ['.completion-slip', '.completion-actions'],
+};
+
+function getEasyLanguageExplanations(
+  step: KioskStep,
+  state: AccessibilityState,
+): readonly EasyLanguageExplanation[] {
+  switch (step) {
+    case 'resident-number':
+      return [
+        {
+          title: '숫자 입력',
+          text: '화면의 숫자 버튼으로 임의의 숫자 13자리를 입력하세요. 실제 주민등록번호는 입력하지 마세요.',
+        },
+        {
+          title: '입력 수정',
+          text: '잘못 입력했다면 ‘정정’으로 마지막 숫자를 지우거나 ‘전체 삭제’로 모두 지울 수 있어요. 입력한 자리는 점으로 표시됩니다.',
+        },
+        {
+          title: '입력 확인',
+          text: '13자리를 입력한 뒤 하단 ‘확인’을 누르세요. 화면을 나가거나 처음 화면으로 돌아가면 입력값은 지워집니다.',
+        },
+      ];
+    case 'options':
+      return [
+        {
+          title: '표시 항목',
+          text: '등본에 표시할 정보를 고르는 단계입니다. 선택한 항목이 발급 내용에 반영됩니다.',
+        },
+        {
+          title: '주소 공개',
+          text: `주소 공개는 ${state.options.address ? '켜져 있어 현재 주소가 표시됩니다.' : '꺼져 있어 현재 주소가 표시되지 않습니다.'}`,
+        },
+        {
+          title: '추가 항목',
+          text: `과거 주소 변동 사항은 ${state.options.history ? '포함' : '미포함'}, 세대 구성 사유는 ${state.options.household ? '포함' : '미포함'} 상태입니다. 선택을 마치면 하단 ‘확인’을 누르세요.`,
+        },
+      ];
+    case 'copies':
+      return [
+        {
+          title: '발급 부수',
+          text: '발급 부수는 받을 등본의 장수입니다. 기본 선택은 1부입니다.',
+        },
+        {
+          title: '부수 선택',
+          text: `현재 ${state.copies}부가 선택되어 있습니다. 숫자 버튼 1~9 또는 더하기·빼기 버튼으로 바꿀 수 있습니다.`,
+        },
+        {
+          title: '수수료 확인',
+          text: state.feeExempt
+            ? '수수료 면제를 선택했습니다. 확인을 누르면 가상 결제 단계로 넘어갑니다.'
+            : `일반 수수료는 한 부당 200원이며, ${state.copies}부의 합계는 ${(state.copies * 200).toLocaleString('ko-KR')}원입니다.`,
+        },
+      ];
+    case 'payment':
+      return [
+        {
+          title: '신청 내용 확인',
+          text: '결제 전에 등본 종류, 발급 부수, 표시 항목과 수수료를 확인하세요.',
+        },
+        {
+          title: '결제 방법',
+          text: '신용·체크카드 또는 현금 버튼을 누르면 해당 방식의 가상 결제 시뮬레이션이 진행됩니다.',
+        },
+        {
+          title: '데모 안내',
+          text: '실제 결제나 현금 수납은 발생하지 않으며, 종이 서류도 출력되지 않습니다.',
+        },
+      ];
+    default:
+      return [];
+  }
+}
+
+function shouldInspectProfileLayout(profile: AccessibilityProfile) {
+  return profile.textSize !== 'standard'
+    || profile.buttonSize === 'large'
+    || profile.bottomControls
+    || profile.viewportMode !== null;
+}
 
 const correctionStrategies: Record<string, readonly string[]> = {
   'text-clipped': ['text-wrap'],
@@ -297,6 +391,13 @@ export function useKioskAccessibility({
         return targets;
       },
       getLayoutRegions: () => {
+        const state = stateRef.current;
+        const primaryActionSelector = primaryActionSelectorsByStep[state.step];
+        const primaryActions = primaryActionSelector
+          ? Array.from(root.querySelectorAll<HTMLElement>(primaryActionSelector))
+          : [];
+        const guidanceAvoidAreas = (guidanceAvoidSelectorsByStep[state.step] ?? [])
+          .flatMap((selector) => Array.from(root.querySelectorAll<HTMLElement>(selector)));
         const regions = {
           bottomControls: [root.querySelector<HTMLElement>('[data-a11y-slot="bottom-controls"]')].filter(
             (element): element is HTMLElement => Boolean(element),
@@ -310,17 +411,12 @@ export function useKioskAccessibility({
           viewportOverlays: Array.from(
             root.querySelectorAll<HTMLElement>('[data-a11y-viewport-overlay]'),
           ),
-          guidanceAvoidAreas: Array.from(
-            root.querySelectorAll<HTMLElement>('.footer-controls button'),
-          ).concat(
-            Array.from(document.querySelectorAll<HTMLElement>('[data-a11y-qr-entry-dock]')),
-          ),
-          primaryActions: (primaryActionIdsByStep[stateRef.current.step] ?? [])
-            .map((id) => root.querySelector<HTMLElement>(`#${id}`))
-            .filter((element): element is HTMLElement => Boolean(element))
-            .map((element) => ({ element })),
+          guidanceAvoidAreas: guidanceAvoidAreas
+            .concat(Array.from(root.querySelectorAll<HTMLElement>('.footer-controls button')))
+            .concat(Array.from(document.querySelectorAll<HTMLElement>('[data-a11y-qr-entry-dock]'))),
+          primaryActions: primaryActions.map((element) => ({ element })),
         };
-        if (stateRef.current.step !== 'main-menu') return regions;
+        if (state.step !== 'main-menu') return regions;
         return {
           ...regions,
           menuItems: Array.from(root.querySelectorAll<HTMLElement>('[data-a11y-menu-item]')),
@@ -367,9 +463,7 @@ export function useKioskAccessibility({
         const currentProfile = profileRef.current;
         currentSdk.applyProfile(currentProfile);
         const automaticCorrections =
-          currentProfile.textSize !== 'standard' ||
-          currentProfile.buttonSize === 'large' ||
-          currentProfile.bottomControls
+          shouldInspectProfileLayout(currentProfile)
             ? currentSdk.getLastLayoutCorrections()
             : [];
         recordLayoutCheck(currentSdk, root, automaticCorrections);
@@ -444,9 +538,7 @@ export function useKioskAccessibility({
 
     sdk.applyProfile(profile);
     const automaticCorrections =
-      profile.textSize !== 'standard' ||
-      profile.buttonSize === 'large' ||
-      profile.bottomControls
+      shouldInspectProfileLayout(profile)
         ? sdk.getLastLayoutCorrections()
         : [];
     recordLayoutCheck(sdk, root, automaticCorrections);
@@ -458,9 +550,14 @@ export function useKioskAccessibility({
     if (!sdk || !root) return;
 
     const guide = guideByStep[step];
+    const stepId = guide?.stepId ?? `civil.${step}`;
     const paused = qrModalOpen || noticeOpen;
+    sdk.setEasyLanguageState({
+      stepId,
+      explanations: getEasyLanguageExplanations(step, stateRef.current),
+    });
     sdk.setGuideState({
-      stepId: guide?.stepId,
+      stepId,
       enabled: profile.smartGuide && step !== 'complete',
       paused: paused || step === 'complete',
       delaySeconds: profile.guideDelaySeconds,

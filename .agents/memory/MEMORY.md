@@ -2,3 +2,4 @@
 - [Local SDK Vite cache](local-sdk-vite-cache.md) — after a local SDK tarball update, clear stale optimized dependencies before browser verification.
 - [Browser input readiness](browser-input-readiness.md) — wait for controlled form state in CDP tests instead of assuming text insertion updates React immediately.
 - [Smart guide step contract](smart-guide-step-contract.md) — use stable business step IDs; distinguish same-step state updates from real idle interaction resets and viewport placement limits.
+- [Shared guide panel scrolling](shared-guide-panel-scrolling.md) — in v0.5.14, an expanded guidance overlay captures gestures started inside it; collapse it or scroll outside, and avoid host CSS workarounds.
