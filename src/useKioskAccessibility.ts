@@ -62,11 +62,13 @@ const guideByStep: Record<KioskStep, {
   stepId?: string;
 } | null> = {
   'main-menu': {
+    stepId: 'certificate.category-selection',
     title: '증명서 선택',
     text: '등본 발급을 원하시면 주민등록 버튼을 눌러 주세요.',
     actionId: 'civil.certificate.01',
   },
   'resident-type': {
+    stepId: 'certificate.type-selection',
     title: '문서 선택',
     text: '주민등록표 등본 버튼을 눌러 주세요.',
     actionId: 'civil.document.copy',
@@ -78,6 +80,7 @@ const guideByStep: Record<KioskStep, {
     actionId: 'civil.resident-number.confirm',
   },
   fingerprint: {
+    stepId: 'certificate.fingerprint-check',
     title: '본인 확인',
     text: '지문 확인 완료 버튼을 눌러 다음 단계로 이동해 주세요.',
     actionId: 'civil.fingerprint.confirm',
@@ -89,8 +92,9 @@ const guideByStep: Record<KioskStep, {
     actionId: 'civil.options.confirm',
   },
   'fee-waiver': {
-    title: '수수료 선택',
-    text: '면제 대상 여부에 맞는 항목을 선택해 주세요.',
+    stepId: 'certificate.fee-waiver',
+    title: '수수료 면제 여부를 선택해 주세요',
+    text: '신청 내용과 수수료 면제 여부를 확인한 뒤 해당하는 항목을 선택해 주세요.',
     actionId: 'civil.fee-waiver.standard',
   },
   copies: {
@@ -101,8 +105,8 @@ const guideByStep: Record<KioskStep, {
   },
   payment: {
     stepId: 'certificate.payment-method',
-    title: '결제 방법을 선택해 주세요',
-    text: '신용·체크카드 버튼을 눌러 가상 결제 시뮬레이션을 진행해 주세요.',
+    title: '신청 내용을 확인해 주세요',
+    text: '증명서 종류, 발급 부수, 표시 항목과 수수료를 확인해 주세요. 내용이 맞으면 결제 방법을 눌러 가상 결제를 진행하세요.',
     actionId: 'civil.payment.card',
   },
   printing: null,
@@ -139,6 +143,28 @@ function getEasyLanguageExplanations(
   state: AccessibilityState,
 ): readonly EasyLanguageExplanation[] {
   switch (step) {
+    case 'main-menu':
+      return [
+        {
+          title: '증명서 선택',
+          text: '현재 주민등록표 등본 발급을 시연할 수 있습니다. 다른 증명서 메뉴는 데모 안내만 표시합니다.',
+        },
+        {
+          title: '개인정보 보호',
+          text: '실제 주민등록번호를 입력하지 마세요. 데모 진행에는 임의의 숫자만 사용합니다.',
+        },
+      ];
+    case 'resident-type':
+      return [
+        {
+          title: '주민등록표 등본',
+          text: '세대 구성원과 주소 정보를 확인하는 등본 발급 시연을 선택할 수 있습니다.',
+        },
+        {
+          title: '주민등록표 초본',
+          text: '초본 발급은 아직 준비 중입니다. 이 데모에서는 등본만 진행할 수 있습니다.',
+        },
+      ];
     case 'resident-number':
       return [
         {
@@ -154,6 +180,17 @@ function getEasyLanguageExplanations(
           text: '13자리를 입력한 뒤 하단 ‘확인’을 누르세요. 화면을 나가거나 처음 화면으로 돌아가면 입력값은 지워집니다.',
         },
       ];
+    case 'fingerprint':
+      return [
+        {
+          title: '지문 확인 시뮬레이션',
+          text: '화면에 안내된 오른손 엄지손가락을 지문인식기 그림의 위치에 올리는 단계입니다. 실제 지문 센서는 작동하지 않습니다.',
+        },
+        {
+          title: '다음 단계',
+          text: '화면의 ‘지문 확인 완료’ 버튼을 누르면 다음 단계로 이동합니다.',
+        },
+      ];
     case 'options':
       return [
         {
@@ -167,6 +204,17 @@ function getEasyLanguageExplanations(
         {
           title: '추가 항목',
           text: `과거 주소 변동 사항은 ${state.options.history ? '포함' : '미포함'}, 세대 구성 사유는 ${state.options.household ? '포함' : '미포함'} 상태입니다. 선택을 마치면 하단 ‘확인’을 누르세요.`,
+        },
+      ];
+    case 'fee-waiver':
+      return [
+        {
+          title: '수수료 면제',
+          text: '정해진 면제 조건에 해당하면 수수료 면제 대상자를 선택하세요. 해당하지 않으면 일반 발급을 선택하세요.',
+        },
+        {
+          title: '선택 결과',
+          text: `현재 ${state.feeExempt ? '수수료 면제 대상' : '일반 발급'}으로 선택되어 있습니다. 선택에 따라 발급 수수료가 계산됩니다.`,
         },
       ];
     case 'copies':
@@ -555,7 +603,7 @@ export function useKioskAccessibility({
     const paused = qrModalOpen || noticeOpen;
     sdk.setEasyLanguageState({
       stepId,
-      explanations: getEasyLanguageExplanations(step, stateRef.current),
+      explanations: paused ? [] : getEasyLanguageExplanations(step, stateRef.current),
     });
     sdk.setGuideState({
       stepId,

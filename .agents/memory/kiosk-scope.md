@@ -27,11 +27,11 @@ The SDK v0.5.3 public API has no screen-change scroll-reset operation. Its QR do
 
 **How to apply:** Treat screen-aware scroll reset and scroll-owner transitions as shared-SDK work. Prefer a public SDK mechanism keyed to the host's stable `screenId`; do not add host-only repeated `scrollTo` calls or CSS overrides.
 
-With extra-large text and large controls on a short mobile viewport, lower keypad rows can start behind the fixed footer even when the menu itself scrolls correctly. A natural document swipe can reveal them; verify actual hit targets after scrolling rather than assuming visible DOM controls are touchable.
+With extra-large text and large controls, lower keypad rows can be obscured by fixed footer controls even when menu scrolling works. Distinguish this from guide-overlay overlap: the guide may be safely suppressed while a natural scroll is still needed to expose the keypad.
 
-**Why:** Browser touch testing at 390×844 showed the resident-number screen needed a document scroll before its last keypad row could be tapped; the complete flow then succeeded.
+**Why:** Browser hit-testing found a keypad button intercepted by the fixed footer while the registered `.stage` scroll area was at its initial position. A natural scroll moved the button into view and a real pointer click succeeded, although the SDK's scroll-space correction reported failure.
 
-**How to apply:** Test both the initial and scrolled positions on each long issuance screen, measure the true scroll owner, and report footer overlap separately from whether touch scrolling recovers access.
+**How to apply:** Measure the actual scroll owner and hit targets before and after a natural gesture. Report fixed-footer occlusion separately from guide suppression; if the adapter correctly registers the footer and scroll area, do not add host CSS or repeated `scrollTo` workarounds for a shared-SDK correction failure.
 
 The additional-menu hint is SDK-owned. Keep certificate buttons registered in DOM order as menu actions and menu items, but allow the hint to overlap ordinary menu tiles; only fixed home, back, confirm, and QR dock controls belong in guidance-avoid regions. The SDK may still report `no-safe-space` in the default QR-dock layout when its candidate positions collide with the dock and footer.
 
@@ -74,3 +74,9 @@ For browser scroll tests, position wheel input inside the measured active scroll
 **Why:** At 390px viewport width the centered kiosk stage was narrower than the viewport, so a test wheel sent to `innerWidth - 4` missed the stage and falsely looked like a scroll failure.
 
 **How to apply:** Read the active owner's `getBoundingClientRect()` and send wheel/touch input within that rectangle; verify both `scrollTop` and the target's hit-test after scrolling.
+
+When a shared-SDK hint changes position during user scrolling, first verify the host's real scroll owner, fixed controls, and avoidance regions. If those are correctly registered, treat placement instability as a shared-SDK issue; do not pin the hint with host CSS or repeated scroll calls.
+
+**Why:** A valid `.stage` scroll-area registration still produced a large hint jump during real wheel input, showing that a host-only workaround would conceal a cross-kiosk SDK defect.
+
+**How to apply:** Reproduce after the screen layout settles, capture the hint and obstacle rectangles before and after scrolling, and stop host edits until the shared SDK behavior is corrected.
