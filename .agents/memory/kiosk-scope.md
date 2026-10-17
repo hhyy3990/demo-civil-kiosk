@@ -80,3 +80,9 @@ When a shared-SDK hint changes position during user scrolling, first verify the 
 **Why:** A valid `.stage` scroll-area registration still produced a large hint jump during real wheel input, showing that a host-only workaround would conceal a cross-kiosk SDK defect.
 
 **How to apply:** Reproduce after the screen layout settles, capture the hint and obstacle rectangles before and after scrolling, and stop host edits until the shared SDK behavior is corrected.
+
+On the ordinary 390×844 home screen, the SDK's “아래에도 내용이 있어요” hint occupies y=798–821 while the fixed footer row occupies y=758–844; its pointer-events are none, and it becomes visibility-hidden at the scroll bottom. With an active bottom-viewport profile, the hint is positioned inside `.stage` and also hides at the bottom.
+
+**Why:** The actual `.stage` and footer regions are registered by the host, yet ordinary-mode hint placement still visually overlaps the disabled previous-screen control.
+
+**How to apply:** Check hint placement separately in default and QR-profile modes. Treat this ordinary-mode overlap as SDK placement behavior; do not patch it with host CSS.
