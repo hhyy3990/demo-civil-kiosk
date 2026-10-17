@@ -1,10 +1,10 @@
 ---
 name: Easy-guide mode reflow
-description: Known easy-language pagination behavior in SDK v0.5.26 when viewport mode changes.
+description: SDK viewport-mode reflow can still clip easy-language guidance in a tight mobile viewport.
 ---
 
-**Rule:** In SDK v0.5.26, changing `setViewportMode()` can shrink the guidance panel without recalculating its current easy-language pages. This leaves old page content and pager controls outside the panel's clipped bounds. Calling `setEasyLanguageState()` again recalculates the pages, but do not use repeated host calls as a workaround.
+**Rule:** SDK v0.5.26 left stale easy-language pagination after `setViewportMode()`. SDK v0.5.27 does re-paginate on a mode change, but a 320×844 bottom-80% case still clips the current text below the guidance panel. Do not add host refresh calls or CSS workarounds.
 
-**Why:** A 320×844 test changed from normal mode to bottom 80%; the panel shrank to 118px while a 522px text region and its pager remained, clipped by `overflow: hidden`. Reapplying the same guidance split it into 112 pages that fit.
+**Why:** In v0.5.27, a long test explanation changed from 24 pages to 208 on a normal-to-bottom-80% transition, but after animation settled the panel bottom was 126px while the text bottom was 136.97px; the panel had `scrollHeight` 128px and `clientHeight` 116px with hidden overflow.
 
-**How to apply:** When testing a newer SDK, change viewport mode with a long easy-language explanation active and inspect the panel, text, and pager bounds. If it still clips, treat it as an SDK-level defect and do not patch host CSS or add repeated refresh calls.
+**How to apply:** On each SDK update, test a long explanation through viewport-mode changes and inspect settled panel, text, and pager bounds. If content clips, treat it as an SDK-level defect and stop host-side workarounds.
