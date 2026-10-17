@@ -3,8 +3,8 @@ name: Guide overlay reflow and clipping
 description: SDK easy-language pagination and expanded Smart Guide sizing need constrained-viewport checks.
 ---
 
-**Rule:** Easy-language pagination may shift its page counters when titles change available space, even if the full text remains sequential. In a constrained 320×844 viewport with bottom-80% mode, expanded Smart Guide content can overflow the SDK toast; do not compensate with host CSS or repeated scrolling.
+**Rule:** Test actual Smart Guide content at both 320×844 and 360×667 with bottom-80% mode. A two-page fit at 320 does not guarantee the same step is available on a shorter screen; when the SDK reports more than two required pages, it suppresses the guide. Treat this as a shared-SDK issue, not a reason to change host copy, CSS, or scroll behavior.
 
-**Why:** The kiosk's actual payment Smart Guide at 320×844 with large text/buttons, high contrast, easy language, and bottom-80% had a 134.6px toast with `scrollHeight` 154px; its 67-character body extended about 20px below the toast while overflow was hidden. Easy-language checks at 320px and 360px also showed page-counter discontinuities as explanation titles changed, although text stayed in order and panel top stayed stable.
+**Why:** The kiosk's actual 67-character payment guidance fit in two visually complete pages at 320×844. At 360×667, the same step required four pages but the SDK allows at most two: panel max-height 99.56px, header 51.19px, body space 44.38px, and measured body height 102.38px. The SDK logged the suppression and showed no Smart Guide.
 
-**How to apply:** On each SDK update, test both multi-page easy-language content and an expanded long Smart Guide at 320×844/bottom-80%. If text extends beyond the toast or its scroll height exceeds the visible height, stop host regression tests and report the shared SDK issue; do not add host CSS or scroll workarounds.
+**How to apply:** On each SDK update, record the actual step ID, text length, profile, viewport, available body height, measured content height, and required page count. If a guide is suppressed, stop host regression tests and report the shared SDK limit; do not add host CSS or rewrite business copy as a workaround.
