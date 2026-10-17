@@ -3,4 +3,4 @@
 - [Browser input readiness](browser-input-readiness.md) — wait for controlled form state in CDP tests instead of assuming text insertion updates React immediately.
 - [Smart guide step contract](smart-guide-step-contract.md) — use stable business step IDs; distinguish same-step state updates from real idle interaction resets and viewport placement limits.
 - [Shared guide panel scrolling](shared-guide-panel-scrolling.md) — in v0.5.14, an expanded guidance overlay captures gestures started inside it; collapse it or scroll outside, and avoid host CSS workarounds.
-- [Easy-guide mode reflow](easy-guide-mode-reflow.md) — v0.5.27 repaginates on mode change but may still clip guidance in a tight 320×844 viewport.
+- [Guide overlay reflow and clipping](easy-guide-mode-reflow.md) — easy-guide counters can shift across titles, and expanded Smart Guide text can overflow at 320×844/80%.

@@ -146,12 +146,8 @@ function getEasyLanguageExplanations(
     case 'main-menu':
       return [
         {
-          title: '증명서 선택',
-          text: '현재 주민등록표 등본 발급을 시연할 수 있습니다. 다른 증명서 메뉴는 데모 안내만 표시합니다.',
-        },
-        {
-          title: '개인정보 보호',
-          text: '실제 주민등록번호를 입력하지 마세요. 데모 진행에는 임의의 숫자만 사용합니다.',
+          title: '쉬운 말 안내가 켜져 있어요.',
+          text: '업무를 선택하면 어려운 말을 쉽게 설명해 드려요.',
         },
       ];
     case 'resident-type':
