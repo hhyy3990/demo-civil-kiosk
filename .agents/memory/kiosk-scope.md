@@ -27,11 +27,11 @@ The SDK v0.5.3 public API has no screen-change scroll-reset operation. Its QR do
 
 **How to apply:** Treat screen-aware scroll reset and scroll-owner transitions as shared-SDK work. Prefer a public SDK mechanism keyed to the host's stable `screenId`; do not add host-only repeated `scrollTo` calls or CSS overrides.
 
-With extra-large text and large controls, lower keypad rows can be obscured by fixed footer controls even when menu scrolling works. Distinguish this from guide-overlay overlap: the guide may be safely suppressed while a natural scroll is still needed to expose the keypad.
+With large accessibility profiles and bottom-viewport settings, content actions such as lower keypad rows and fingerprint confirmation can extend below the visible stage and be intercepted by fixed footer controls. A natural scroll may expose them. Distinguish this from guide-overlay overlap.
 
-**Why:** Browser hit-testing found a keypad button intercepted by the fixed footer while the registered `.stage` scroll area was at its initial position. A natural scroll moved the button into view and a real pointer click succeeded, although the SDK's scroll-space correction reported failure.
+**Why:** Browser hit-testing found both a keypad button and, at 390×844 with large text/buttons and bottom 80%, the fingerprint confirmation intercepted by the fixed footer. A natural wheel scroll brought the fingerprint action inside the stage and a real pointer click succeeded.
 
-**How to apply:** Measure the actual scroll owner and hit targets before and after a natural gesture. Report fixed-footer occlusion separately from guide suppression; if the adapter correctly registers the footer and scroll area, do not add host CSS or repeated `scrollTo` workarounds for a shared-SDK correction failure.
+**How to apply:** Measure the actual scroll owner and hit targets on each issuance stage before and after a natural gesture. Report fixed-footer occlusion separately from guide suppression; if the adapter correctly registers the footer and scroll area, do not add host CSS or repeated `scrollTo` workarounds for a shared-SDK correction failure.
 
 The additional-menu hint is SDK-owned. Keep certificate buttons registered in DOM order as menu actions and menu items, but allow the hint to overlap ordinary menu tiles. Validate its intersection with every fixed control separately: moving the hint away from the QR dock can still place it over `.device-footer` in the default layout, while bottom-viewport profiles may have a safe gap.
 

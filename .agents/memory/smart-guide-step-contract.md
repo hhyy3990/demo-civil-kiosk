@@ -9,6 +9,12 @@ Pass a stable host-owned `stepId` for business stages whose React state changes 
 
 **How to apply:** Keep `stepId` semantic and value-free. When checking timer preservation, account for or isolate SDK interaction events rather than interpreting pointerdown resets as a failed same-step contract.
 
+Closing a Smart Guide with its X suppresses that guide for the same semantic step across rerenders and repeated same-step state updates. It should remain dismissed for at least 30 seconds, while a different next step can schedule its own guide normally.
+
+**Why:** Browser testing closed a guide, triggered a same-step modal and Easy Language pager updates, observed no repeat for 30 seconds, then observed a new guide after moving to another step.
+
+**How to apply:** Test dismissal through the X, exercise same-step UI updates, wait at least 30 seconds, then move to a distinct step and verify its guide timer still works. Do not turn same-step suppression into a global guide disable.
+
 In a short viewport with bottom-viewport mode, a smart guide targeting a control in the fixed footer may be omitted if the SDK cannot find a safe position inside the active viewport. This can occur even when the guide appears on the home screen under the same profile.
 
 **Why:** At 360×667 with a 60% profile, the active screen area measured about 301px high; the SDK displayed the home guide but did not place guides for issuance steps whose emphasized actions were in the footer.
