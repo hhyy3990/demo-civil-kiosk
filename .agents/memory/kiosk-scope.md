@@ -33,11 +33,11 @@ With extra-large text and large controls, lower keypad rows can be obscured by f
 
 **How to apply:** Measure the actual scroll owner and hit targets before and after a natural gesture. Report fixed-footer occlusion separately from guide suppression; if the adapter correctly registers the footer and scroll area, do not add host CSS or repeated `scrollTo` workarounds for a shared-SDK correction failure.
 
-The additional-menu hint is SDK-owned. Keep certificate buttons registered in DOM order as menu actions and menu items, but allow the hint to overlap ordinary menu tiles; only fixed home, back, confirm, and QR dock controls belong in guidance-avoid regions. The SDK may still report `no-safe-space` in the default QR-dock layout when its candidate positions collide with the dock and footer.
+The additional-menu hint is SDK-owned. Keep certificate buttons registered in DOM order as menu actions and menu items, but allow the hint to overlap ordinary menu tiles. Validate its intersection with every fixed control separately: moving the hint away from the QR dock can still place it over `.device-footer` in the default layout, while bottom-viewport profiles may have a safe gap.
 
-**Why:** The user explicitly permits overlap with ordinary menu items so the hint can remain visible, while fixed navigation and confirmation controls must stay unobstructed. Browser testing at 390×844 showed the hint in 60/70/80% bottom-viewport modes, but the default layout had no safe placement because the QR dock and fixed footer blocked the SDK's candidate slots.
+**Why:** The user explicitly permits overlap with ordinary menu items so the hint can remain visible, while fixed navigation and confirmation controls must stay unobstructed. Browser testing at 390×844 showed zero QR-dock overlap but about 9,667px² of overlap with the fixed footer in default mode; 70% and 80% test modes had zero overlap with either fixed region.
 
-**How to apply:** For future menu screens, register the real list, scroll owner, and fixed controls accurately. Do not duplicate the hint in the host or remove real controls from avoidance regions to force it; report or address the safe-area limitation in the shared SDK.
+**How to apply:** For future menu screens, register the real list, scroll owner, and fixed controls accurately. Measure the hint against the QR dock, footer, and individual footer buttons in default and bottom-viewport modes. Do not count avoiding only one fixed region as success, duplicate the hint in the host, or remove real controls from avoidance regions.
 
 Under accessibility profiles that activate layout correction, inserting a host notice/modal inside the SDK root can trigger its layout `MutationObserver` and reposition the active scroll owner. Keep the host notice mounted and toggle visibility/update a persistent text node instead of conditionally inserting it.
 
