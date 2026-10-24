@@ -279,25 +279,23 @@ Runtime Development Mock의 `viewportClass` 분류(`universal-layout/civil-layou
 
 ## 7. 중앙 fixture와 확인 가능한 차이
 
-요청자가 제공한 중앙 현황은 “중앙 `POST /api/dev/universal-layout/plan`이 동일 생성기/검증기로 DemoCoffee 및 무인민원발급기 테스트 모델을 처리하나 civil policy는 `civil-kiosk-mock` fixture”라는 설명이다. 중앙 코드·응답은 이번 작업에서 확인하지 않았다.
+첨부된 최신 중앙 fixture 명세에 따르면 중앙 Development 정책은 `hostId=civil-kiosk-mock`, `screenId=civil.main-menu`, `structureVersion=civil-main-mock.v1`, component `civil.certificate-grid`를 사용한다. compact `[1]`, regular `[1,2]`, wide `[1,2]`이며 큰 글씨·큰 버튼·고대비·하단 viewport는 `[1]`로 제한한다. wide의 3열 허용 문제는 중앙에서 수정됐다고 명세에 기재되어 있다. 이 값은 첨부 명세를 근거로 기록했으며, 중앙 API를 호출해 독립 검증하지 않았다.
 
 현재 로컬 소스에서 확인되는 점:
 
 1. 중앙 API 경로와 로컬 Endpoint 경로가 다르다. 로컬 경로는 `/api/dev/universal-layout/mock`이고 네트워크 연결은 없다.
-2. 로컬 runtime policy도 `hostId: civil-kiosk-mock`을 사용한다. 이는 테스트용 값이며 실호스트 ID가 확인된 것은 아니다.
-3. 로컬 runtime `civil-layout-mock.ts`는 wide에서 `[1,2]`를 허용한다.
-4. 별도 공통 계약 테스트 `universal-layout-contract.test.ts` 안의 civil fixture는 wide에서 `[1,2,3]`을 허용한다. 따라서 **로컬 내부에도 wide 정책 불일치가 있다.**
-5. 테스트 fixture는 `itemOrderHash`에 `fixtureHash("civil.certificate-grid-ordered-fixture-v1")`라는 합성 hash를 사용한다. 실행용 Mock은 실제 18개 고정 action ID 순서에서 만든 hash를 사용한다.
-6. 두 local 정책 모두 큰 글씨/버튼, 고대비, bottom viewport에 1열 제약을 선언한다. runtime은 `bottomControls=true`에도 별도 1열 정책을 선택한다.
-7. 현재 CSS 기본은 wide에서 3열이지만 runtime AI/Mock 허용값은 최대 2열이다.
+2. 로컬 runtime policy도 동일한 mock 식별자와 standard 열 수 `[1]`, `[1,2]`, `[1,2]`를 사용한다. 이는 실호스트 ID가 확정됐다는 뜻은 아니다.
+3. 이 조사에서 공통 계약 테스트 fixture의 wide `[1,2,3]`과 합성 item-order hash를 발견했다. 안전한 실행 정책은 변경하지 않고 테스트 fixture만 수정해 runtime 정책 및 실제 18개 ID 순서 hash에 맞췄다.
+4. 로컬 runtime은 공통 모델 accessibility schema에 들어가지 않는 `bottomControls=true` 입력도 별도 정책 선택으로 1열 제한한다. 중앙 명세의 네 가지 접근성 조건과 이 추가 신호의 관계는 중앙 정책 소유자가 확정해야 한다.
+5. 현재 CSS 기본은 wide에서 3열이지만 runtime AI/Mock 허용값은 최대 2열이다.
 
-따라서 중앙 fixture와의 “정확한 정책 diff”는 중앙 정책 원문이나 중앙 응답을 받기 전에는 확정할 수 없다. 특히 중앙 `civil-kiosk-mock` 정책도 위 로컬 fixture와 같은 값이라고 가정하면 안 된다.
+위 표준 fixture 필드의 중앙·로컬 일치는 제공된 중앙 명세와 로컬 소스를 비교한 결과다. 실제 중앙 응답/등록 상태는 확인하지 않았다. 두 곳 모두 사용하는 `civil-kiosk-mock`과 `civil-main-mock.v1`은 명세상 실험용 식별자이므로 실제 호스트 등록 ID로 간주하지 않는다.
 
 ## 8. 중앙에 실제 Development 정책 등록 시 필요한 자료
 
 중앙 fixture를 실호스트 정책으로 바꾸기 전에 다음 항목을 중앙 정책 소유자와 합의해야 한다.
 
-1. **정식 host identity**: Production/Development에서 안정적으로 사용할 `hostId`. 현재 `civil-kiosk-mock`은 재사용하지 않는 것을 권장한다. 구체 ID는 중앙 registry 규칙에 따라 확정해야 한다.
+1. **정식 host identity**: Production/Development에서 안정적으로 사용할 `hostId`. 현재 `civil-kiosk-mock`과 `civil-main-mock.v1`은 실험용이므로 실호스트 ID/버전으로 사용할지 중앙 registry 규칙에 따라 결정해야 한다.
 2. **화면·컴포넌트 identity**: `civil.main-menu`, `civil.certificate-grid`가 정식 ID인지 확인. 실제 DOM에 의미 ID를 명시할지 호스트 매핑에서 유지할지 결정.
 3. **구조 버전 및 변경 규칙**: 현재 mock `civil-main-mock.v1`을 실호스트 버전으로 사용하지 말고, 메뉴 구조/ID 의미 변경 시 version을 올리는 기준을 정한다.
 4. **항목 목록 계약**: 18개 stable ID의 순서, 항목 수, `itemOrderHash` 생성 입력 및 버전 변경 조건.
@@ -311,8 +309,8 @@ Runtime Development Mock의 `viewportClass` 분류(`universal-layout/civil-layou
 ## 9. 미확정 정책 및 위험
 
 - 실제 Universal `hostId`와 `structureVersion`은 미확정이다.
-- 중앙 `civil-kiosk-mock` policy의 정확한 wide 허용 열, 접근성 조건 및 item hash 입력은 확인하지 못했다.
-- 로컬 contract unit test의 wide `[1,2,3]`과 runtime Mock의 `[1,2]` 불일치가 있다. 어느 쪽이 중앙 정책 의도인지는 미확정이다.
+- 중앙 정책의 열 수와 접근성 조건은 최신 첨부 명세에서 확인했으나, 중앙 API 요청·응답으로 독립 재현하지 않았다.
+- 로컬 contract test fixture를 runtime 정책과 실제 항목 순서 hash에 맞췄다. 테스트 전용 fixture와 실행용 정책의 기존 불일치는 해소됐다.
 - 현재 component ID는 local semantic mapping이다. DOM 요소에 범용 의미 등록 속성이 있다는 뜻은 아니다.
 - `minimumTouchTargetPx=44`는 모델 선언과 validator 제약이다. 중앙이 실제 렌더 DOM의 버튼 크기와 클릭 가능 여부를 측정해 보장한다는 의미가 아니다.
 - 1080px에서 CSS 기본 3열과 runtime Mock 최대 2열은 서로 다른 정책이다. 중앙이 3열을 허용한다면 큰 화면에서 실제 레이아웃/터치 검증이 필요하다.
@@ -338,7 +336,7 @@ Runtime Development Mock의 `viewportClass` 분류(`universal-layout/civil-layou
 - 실제 screen ID: `civil.main-menu`
 - DOM component: `.certificate-grid`; local Mock semantic ID는 `civil.certificate-grid`
 - 접근성별 runtime 허용 열: compact `[1]`; regular/wide 기본 `[1,2]`; 큰 글씨·큰 버튼·고대비·bottom viewport·bottomControls 적용 시 `[1]`
-- 중앙 fixture와의 차이: 로컬 runtime wide `[1,2]` 대 로컬 test fixture wide `[1,2,3]`; 중앙 정책 자체의 값은 미확인
-- 문서: `CIVIL_KIOSK_UNIVERSAL_V1_HOST_CONTRACT.md`
+- 중앙 fixture와 로컬 runtime의 표준 열 정책: compact `[1]`, regular `[1,2]`, wide `[1,2]`; 접근성 제약은 `[1]` (첨부 명세 기반, API 미호출)
+- Golden Vector: `CIVIL_KIOSK_UNIVERSAL_V1_GOLDEN_VECTORS.md`
 - AI/API 호출: **0회** (중앙 API 및 OpenAI 모두 호출하지 않음)
 - Production 변경/배포: **없음**

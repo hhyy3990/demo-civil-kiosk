@@ -115,6 +115,140 @@ test('two columns are rejected for larger text, larger buttons, high contrast, b
   }
 });
 
+test('host golden vectors keep structure stable and match viewport/accessibility constraint hashes', () => {
+  const vectors: Array<{
+    name: string;
+    input: CivilLayoutMockRequest;
+    viewportClass: 'compact' | 'regular' | 'wide';
+    allowedColumns: number[];
+    constraintHash: string;
+  }> = [
+    {
+      name: '320px standard',
+      input: request({ viewport: { width: 320, height: 844, gridWidth: 292 } }),
+      viewportClass: 'compact',
+      allowedColumns: [1],
+      constraintHash: 'adb813aa6fb8276e2dfe63188e7a169e5d38395eac11c8312e43aad5496ef1d5',
+    },
+    {
+      name: '360px standard',
+      input: request({ viewport: { width: 360, height: 844, gridWidth: 332 } }),
+      viewportClass: 'compact',
+      allowedColumns: [1],
+      constraintHash: 'adb813aa6fb8276e2dfe63188e7a169e5d38395eac11c8312e43aad5496ef1d5',
+    },
+    {
+      name: '390px standard',
+      input: request(),
+      viewportClass: 'regular',
+      allowedColumns: [1, 2],
+      constraintHash: 'd18ee30970e42458e830b1add156184eb862d14c10633a44aa22ab1f41213b2a',
+    },
+    {
+      name: '1080px standard',
+      input: request({ viewport: { width: 1080, height: 1920, gridWidth: 470 } }),
+      viewportClass: 'wide',
+      allowedColumns: [1, 2],
+      constraintHash: '1b771f4cd9c43c7311cd95c27eb316aa96909cda355d13dc7c6cc24940a44463',
+    },
+    {
+      name: '390px large text',
+      input: request({
+        accessibility: {
+          textScale: 'large',
+          buttonScale: 'standard',
+          contrast: 'standard',
+          bottomControls: false,
+          viewportMode: null,
+        },
+      }),
+      viewportClass: 'regular',
+      allowedColumns: [1],
+      constraintHash: '2cd8c25f2b197832d1b6d9cba75a9e4bd28fdf6742e896bc1ba3a048aff008af',
+    },
+    {
+      name: '390px large buttons',
+      input: request({
+        accessibility: {
+          textScale: 'standard',
+          buttonScale: 'large',
+          contrast: 'standard',
+          bottomControls: false,
+          viewportMode: null,
+        },
+      }),
+      viewportClass: 'regular',
+      allowedColumns: [1],
+      constraintHash: '32b8db345f531bbf63728d7270d70133b35a079a8067d92d2a12f28500d500bc',
+    },
+    {
+      name: '390px high contrast',
+      input: request({
+        accessibility: {
+          textScale: 'standard',
+          buttonScale: 'standard',
+          contrast: 'high',
+          bottomControls: false,
+          viewportMode: null,
+        },
+      }),
+      viewportClass: 'regular',
+      allowedColumns: [1],
+      constraintHash: '1fbc74335278dc9bdeaded6b953b2802f641301c3a8fab1d9a236f0bb60921c2',
+    },
+    {
+      name: '390px bottom viewport 80%',
+      input: request({
+        accessibility: {
+          textScale: 'standard',
+          buttonScale: 'standard',
+          contrast: 'standard',
+          bottomControls: false,
+          viewportMode: { mode: 'bottom', heightPercent: 80 },
+        },
+      }),
+      viewportClass: 'regular',
+      allowedColumns: [1],
+      constraintHash: 'abce520b55c6e47350afe6317646109afef0fba7a400c1eb12de17ff15e7fc54',
+    },
+    {
+      name: '390px bottom controls',
+      input: request({
+        accessibility: {
+          textScale: 'standard',
+          buttonScale: 'standard',
+          contrast: 'standard',
+          bottomControls: true,
+          viewportMode: null,
+        },
+      }),
+      viewportClass: 'regular',
+      allowedColumns: [1],
+      constraintHash: 'cbe6a636f748e176e38529d5211f262b307fa1de3351a54efdea91974d634ef1',
+    },
+  ];
+
+  for (const vector of vectors) {
+    const { model, plan } = createValidatedCivilLayoutMock(vector.input);
+    assert.equal(model.viewportClass, vector.viewportClass, vector.name);
+    assert.deepEqual(model.components[0]?.allowedColumns, vector.allowedColumns, vector.name);
+    assert.equal(model.components[0]?.itemCount, 18, vector.name);
+    assert.equal(
+      model.components[0]?.itemOrderHash,
+      '1f984cacde0e9014a80a73b90f15ea8a2ca3002ee5a1a65b737cd8fe11e9342c',
+      vector.name,
+    );
+    assert.equal(model.components[0]?.minimumTouchTargetPx, 44, vector.name);
+    assert.equal(
+      model.structureHash,
+      '70dbb9c683297736d73f982a88c107394d7c643385a653c4c3480723a1a2419b',
+      vector.name,
+    );
+    assert.equal(model.constraintHash, vector.constraintHash, vector.name);
+    assert.equal(plan.operations[0]?.columns, 1, vector.name);
+  }
+});
+
 test('the development mock rejects other screens, targets, and operations through the strict request and shared contract', () => {
   assert.throws(() => createValidatedCivilLayoutMock({
     ...request(),

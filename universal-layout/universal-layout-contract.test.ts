@@ -12,8 +12,13 @@ import {
   type UniversalLayoutPlan,
   type UniversalLayoutPolicy,
 } from "./universal-layout-contract";
+import { civilLayoutMockPolicies } from "./civil-layout-mock";
 
 const fixtureHash = (name: string) => universalSha256({ fixture: name });
+const civilCertificateIds = Array.from(
+  { length: 18 },
+  (_, index) => `civil.certificate.${String(index + 1).padStart(2, "0")}`,
+);
 
 const demoCoffeePolicy: UniversalLayoutPolicy = {
   hostId: "democoffee",
@@ -48,7 +53,7 @@ const civilServiceMockPolicy: UniversalLayoutPolicy = {
     order: 0,
     itemCountRange: [18, 18],
     operations: ["setColumns"],
-    allowedColumnsByViewport: { compact: [1], regular: [1, 2], wide: [1, 2, 3] },
+    allowedColumnsByViewport: { compact: [1], regular: [1, 2], wide: [1, 2] },
     singleColumnForLargeText: true,
     singleColumnForLargeButtons: true,
     singleColumnForHighContrast: true,
@@ -73,7 +78,9 @@ function modelFor(policy: UniversalLayoutPolicy, viewportClass: "compact" | "reg
     componentState: policy.components.map((component) => ({
       id: component.id,
       itemCount: component.id === "civil.certificate-grid" ? 18 : 12,
-      itemOrderHash: fixtureHash(`${component.id}-ordered-fixture-v1`),
+      itemOrderHash: component.id === "civil.certificate-grid"
+        ? universalSha256({ orderedItemIds: civilCertificateIds })
+        : fixtureHash(`${component.id}-ordered-fixture-v1`),
     })),
   });
 }
@@ -114,17 +121,19 @@ test("one policy validator accepts menu.v2 one- and two-column mock plans", () =
 });
 
 test("civil kiosk fixture uses the same repeated-card-list validator and explicit mock columns", () => {
+  assert.deepEqual(civilServiceMockPolicy, civilLayoutMockPolicies.standard);
   const model = validateUniversalLayoutModel(modelFor(civilServiceMockPolicy), policies);
   assert.equal(model.components[0].itemCount, 18);
+  assert.equal(model.components[0].itemOrderHash, universalSha256({ orderedItemIds: civilCertificateIds }));
   assert.deepEqual(model.components[0].allowedColumns, [1, 2]);
   assert.doesNotThrow(() =>
     validateUniversalLayoutPlan(planFor(model, "civil.certificate-grid", 2), model, policies),
   );
 
   const wideModel = validateUniversalLayoutModel(modelFor(civilServiceMockPolicy, "wide"), policies);
-  assert.deepEqual(wideModel.components[0].allowedColumns, [1, 2, 3]);
+  assert.deepEqual(wideModel.components[0].allowedColumns, [1, 2]);
   assert.doesNotThrow(() =>
-    validateUniversalLayoutPlan(planFor(wideModel, "civil.certificate-grid", 3), wideModel, policies),
+    validateUniversalLayoutPlan(planFor(wideModel, "civil.certificate-grid", 2), wideModel, policies),
   );
   assert.throws(() =>
     validateUniversalLayoutPlan(planFor(model, "civil.certificate-grid", 3), model, policies),
@@ -179,7 +188,7 @@ test("the 18-item mock cannot change item count or order through the plan contra
   const model = modelFor(civilServiceMockPolicy);
   const plan = planFor(model, "civil.certificate-grid", 2);
   assert.equal(model.components[0].itemCount, 18);
-  assert.equal(model.components[0].itemOrderHash, fixtureHash("civil.certificate-grid-ordered-fixture-v1"));
+  assert.equal(model.components[0].itemOrderHash, universalSha256({ orderedItemIds: civilCertificateIds }));
   assert.throws(() => validateUniversalLayoutPlan({
     ...plan,
     operations: [{ type: "setColumns", targetId: "civil.certificate-grid", columns: 2, itemCount: 17 }],
