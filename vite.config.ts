@@ -2,6 +2,10 @@ import { CENTRAL_QR_ORIGIN, isValidProfileToken } from '@naebangsik/kiosk-access
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { defineConfig, type Plugin } from 'vite';
 import react from '@vitejs/plugin-react';
+import {
+  createValidatedCivilLayoutMock,
+  UniversalLayoutValidationError,
+} from './universal-layout/civil-layout-mock.js';
 
 const replitHosts = [
   process.env.REPLIT_DEV_DOMAIN,
@@ -18,7 +22,7 @@ function sendJson(response: ServerResponse, status: number, body: unknown) {
   response.end(JSON.stringify(body));
 }
 
-function readRequestBody(request: IncomingMessage) {
+function readRequestBody(request: IncomingMessage, bodyLimit = maxRequestBytes) {
   return new Promise<Buffer>((resolve, reject) => {
     const chunks: Buffer[] = [];
     let size = 0;
@@ -27,7 +31,7 @@ function readRequestBody(request: IncomingMessage) {
     request.on('data', (chunk: Buffer | string) => {
       const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
       size += buffer.length;
-      if (size > maxRequestBytes) {
+      if (size > bodyLimit) {
         if (!oversized) reject(new Error('BODY_TOO_LARGE'));
         oversized = true;
         return;
@@ -63,7 +67,7 @@ function qrProfileRelay() {
 
     let payload: unknown;
     try {
-      payload = JSON.parse((await readRequestBody(request)).toString('utf8'));
+      payload = JSON.parse((await readRequestBody(request, 2048)).toString('utf8'));
     } catch (error) {
       return sendJson(response, error instanceof Error && error.message === 'BODY_TOO_LARGE' ? 413 : 400, {
         error: error instanceof Error && error.message === 'BODY_TOO_LARGE' ? 'REQUEST_TOO_LARGE' : 'INVALID_JSON',
@@ -105,6 +109,45 @@ function qrProfileRelay() {
   };
 }
 
+function universalLayoutMockRelay() {
+  return async (request: IncomingMessage, response: ServerResponse, next: (error?: any) => void) => {
+    const pathname = (request.url ?? '/').split('?')[0];
+    if (pathname !== '/api/dev/universal-layout/mock') return next();
+
+    if (request.method !== 'POST') {
+      response.setHeader('Allow', 'POST');
+      return sendJson(response, 405, { error: 'METHOD_NOT_ALLOWED' });
+    }
+    if (!request.headers['content-type']?.toLowerCase().includes('application/json')) {
+      return sendJson(response, 415, { error: 'JSON_REQUIRED' });
+    }
+    const contentLength = Number(request.headers['content-length'] ?? 0);
+    if (contentLength > 2048) {
+      request.resume();
+      return sendJson(response, 413, { error: 'REQUEST_TOO_LARGE' });
+    }
+
+    let payload: unknown;
+    try {
+      payload = JSON.parse((await readRequestBody(request)).toString('utf8'));
+    } catch (error) {
+      return sendJson(response, error instanceof Error && error.message === 'BODY_TOO_LARGE' ? 413 : 400, {
+        error: error instanceof Error && error.message === 'BODY_TOO_LARGE' ? 'REQUEST_TOO_LARGE' : 'INVALID_JSON',
+      });
+    }
+
+    try {
+      const result = createValidatedCivilLayoutMock(payload);
+      return sendJson(response, 200, { accepted: true, plan: result.plan });
+    } catch (error) {
+      if (error instanceof UniversalLayoutValidationError) {
+        return sendJson(response, 200, { accepted: false, error: error.code });
+      }
+      return sendJson(response, 400, { error: 'INVALID_MOCK_REQUEST' });
+    }
+  };
+}
+
 const qrProfileRelayPlugin: Plugin = {
   name: 'naebangsik-qr-profile-relay',
   configureServer(server) {
@@ -115,8 +158,15 @@ const qrProfileRelayPlugin: Plugin = {
   },
 };
 
+const universalLayoutMockPlugin: Plugin = {
+  name: 'civil-kiosk-universal-layout-development-mock',
+  configureServer(server) {
+    server.middlewares.use(universalLayoutMockRelay());
+  },
+};
+
 export default defineConfig({
-  plugins: [react(), qrProfileRelayPlugin],
+  plugins: [react(), qrProfileRelayPlugin, universalLayoutMockPlugin],
   server: {
     host: '0.0.0.0',
     port: 5000,

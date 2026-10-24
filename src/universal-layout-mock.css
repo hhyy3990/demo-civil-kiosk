@@ -1,0 +1,10 @@
+.universal-layout-mock {margin:0 0 8px;padding:7px 9px;border:1px dashed #8ba4af;background:#f5f8f9;color:#3e5d6b;font-size:10px}
+.universal-layout-mock summary {font-weight:800;cursor:pointer}
+.universal-layout-mock>p {margin:6px 0;line-height:1.45}
+.universal-layout-mock-actions {display:flex;flex-wrap:wrap;gap:6px}
+.universal-layout-mock-actions button {min-height:36px;padding:6px 10px;border:1px solid #8da4ae;background:#fff;color:#355567;font:700 10px 'Noto Sans KR',sans-serif;cursor:pointer}
+.universal-layout-mock-actions button[aria-pressed="true"] {background:#e2eff5;border-color:#3e829f;color:#1d5672}
+.universal-layout-mock-actions button:disabled {opacity:.55;cursor:wait}
+.universal-layout-mock-status {color:#536c77}
+.certificate-grid[data-universal-columns="1"] {grid-template-columns:repeat(1,minmax(0,1fr))}
+.certificate-grid[data-universal-columns="2"] {grid-template-columns:repeat(2,minmax(0,1fr))}

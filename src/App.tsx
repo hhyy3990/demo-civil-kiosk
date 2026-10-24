@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ArrowLeft, Check, Home, Info } from 'lucide-react';
 import {
   DEFAULT_COMPLETION_SECONDS,
@@ -22,9 +22,14 @@ import {
 } from './components/KioskScreens';
 import { QrSetupModal } from './components/QrSetupModal';
 import { BottomViewportTestControls } from './components/BottomViewportTestControls';
+import { useUniversalLayoutMock } from './useUniversalLayoutMock';
 import { useKioskAccessibility, type KioskStep } from './useKioskAccessibility';
 import '@naebangsik/kiosk-accessibility-sdk/styles.css';
 import './styles.css';
+
+if (import.meta.env.DEV) {
+  void import('./universal-layout-mock.css');
+}
 
 const steps: KioskStep[] = ['main-menu', 'resident-type', 'resident-number', 'fingerprint', 'options', 'fee-waiver', 'copies', 'payment', 'printing', 'complete'];
 const DEV_ACCESSIBILITY_EXPERIENCE_PROFILE: AccessibilityProfile | null = import.meta.env.DEV
@@ -49,6 +54,19 @@ const stepNames: Record<KioskStep, string> = {
   fingerprint: '본인 확인', options: '발급 옵션', 'fee-waiver': '수수료 면제', copies: '발급 부수',
   payment: '신청 내용 확인', printing: '인쇄 중', complete: '발급 완료',
 };
+
+function useDisabledUniversalLayoutMock(_options: Parameters<typeof useUniversalLayoutMock>[0]) {
+  return {
+    columns: null,
+    pending: false,
+    message: '',
+    apply: (_columns: 1 | 2 | null) => {},
+  };
+}
+
+const useEnvironmentUniversalLayoutMock = import.meta.env.DEV
+  ? useUniversalLayoutMock
+  : useDisabledUniversalLayoutMock;
 
 function App() {
   const rootRef = useRef<HTMLElement>(null);
@@ -128,6 +146,17 @@ function App() {
     onOpenQr: openQrModal,
     viewportTestEnabled: showViewportTestControls,
     devViewportPercent,
+  });
+  const layoutAccessibilityProfile = useMemo<AccessibilityProfile>(() => ({
+    ...accessibilityProfile,
+    viewportMode: !accessibilityProfileApplied && devViewportPercent !== null
+      ? { mode: 'bottom', heightPercent: devViewportPercent }
+      : accessibilityProfile.viewportMode,
+  }), [accessibilityProfile, accessibilityProfileApplied, devViewportPercent]);
+  const universalLayoutMock = useEnvironmentUniversalLayoutMock({
+    enabled: import.meta.env.DEV,
+    step,
+    profile: layoutAccessibilityProfile,
   });
   const reset = useCallback(() => {
     try {
@@ -246,6 +275,10 @@ function App() {
                 onSelectCategory={selectCategory}
                 showDevAccessibilityExperience={showDevAccessibilityExperience}
                 onStartDevAccessibilityExperience={startDevAccessibilityExperience}
+                universalMockColumns={universalLayoutMock.columns}
+                universalMockPending={universalLayoutMock.pending}
+                universalMockMessage={universalLayoutMock.message}
+                onUniversalMockApply={universalLayoutMock.apply}
               />
             )}
             {step === 'resident-type' && <ResidentTypeScreen onSelectCopy={() => setStep('resident-number')} onUnavailable={() => setNotice('주민등록표(초본)은 현재 준비 중입니다. 데모에서는 등본 발급을 이용해 주십시오.')}/>}

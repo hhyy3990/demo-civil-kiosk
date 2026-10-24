@@ -1,4 +1,8 @@
 import { Check, ChevronRight, Fingerprint, Home, Info, Printer, ShieldCheck } from 'lucide-react';
+import {
+  UniversalLayoutMockControls,
+  type UniversalMockColumns,
+} from './UniversalLayoutMockControls';
 
 export type IssueOptions = {
   address: boolean;
@@ -16,10 +20,18 @@ export function MainMenuScreen({
   onSelectCategory,
   showDevAccessibilityExperience,
   onStartDevAccessibilityExperience,
+  universalMockColumns,
+  universalMockPending,
+  universalMockMessage,
+  onUniversalMockApply,
 }: {
   onSelectCategory: (category: string) => void;
   showDevAccessibilityExperience: boolean;
   onStartDevAccessibilityExperience: () => void;
+  universalMockColumns: UniversalMockColumns | null;
+  universalMockPending: boolean;
+  universalMockMessage: string;
+  onUniversalMockApply: (columns: UniversalMockColumns | null) => void;
 }) {
   return (
     <section className="screen-view main-view">
@@ -44,8 +56,19 @@ export function MainMenuScreen({
           <ChevronRight size={18} aria-hidden="true" />
         </button>
       )}
-      <div className="certificate-grid" aria-label="증명서 종류" data-a11y-grid>
-        {certificateCategories.map((category, index) => <button key={category} id={index === 0 ? 'main-resident-button' : `certificate-category-${index + 1}`} data-a11y-action-id={`civil.certificate.${String(index + 1).padStart(2, '0')}`} data-a11y-menu-item className={`category-button ${index === 0 ? 'category-active' : ''}`} onClick={() => onSelectCategory(category)}>
+      <UniversalLayoutMockControls
+        activeColumns={universalMockColumns}
+        pending={universalMockPending}
+        message={universalMockMessage}
+        onApply={onUniversalMockApply}
+      />
+      <div
+        className="certificate-grid"
+        aria-label="증명서 종류"
+        data-a11y-grid
+        data-universal-columns={universalMockColumns ?? undefined}
+      >
+        {certificateCategories.map((category, index) => <button key={category} id={index === 0 ? 'main-resident-button' : `certificate-category-${index + 1}`} data-a11y-action-id={import.meta.env.DEV ? `civil.certificate.${String(index + 1).padStart(2, '0')}` : undefined} data-a11y-menu-item className={`category-button ${index === 0 ? 'category-active' : ''}`} onClick={() => onSelectCategory(category)}>
           <span className="category-number">{String(index + 1).padStart(2, '0')}</span><span className="category-name">{category}</span><ChevronRight size={16} className="category-arrow" />
         </button>)}
       </div>
