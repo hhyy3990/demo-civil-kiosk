@@ -6,6 +6,7 @@ import {
   createValidatedCivilLayoutMock,
   UniversalLayoutValidationError,
 } from './universal-layout/civil-layout-mock.js';
+import { createCentralDevelopmentRelayPlugin } from './universal-layout/central-development-relay.js';
 
 const replitHosts = [
   process.env.REPLIT_DEV_DOMAIN,
@@ -166,7 +167,12 @@ const universalLayoutMockPlugin: Plugin = {
 };
 
 export default defineConfig({
-  plugins: [react(), qrProfileRelayPlugin, universalLayoutMockPlugin],
+  plugins: [
+    react(),
+    qrProfileRelayPlugin,
+    universalLayoutMockPlugin,
+    createCentralDevelopmentRelayPlugin(),
+  ],
   server: {
     host: '0.0.0.0',
     port: 5000,

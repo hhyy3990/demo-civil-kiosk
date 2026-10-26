@@ -23,6 +23,7 @@ export function MainMenuScreen({
   universalMockColumns,
   universalMockPending,
   universalMockMessage,
+  universalMockBackend,
   onUniversalMockApply,
 }: {
   onSelectCategory: (category: string) => void;
@@ -31,6 +32,7 @@ export function MainMenuScreen({
   universalMockColumns: UniversalMockColumns | null;
   universalMockPending: boolean;
   universalMockMessage: string;
+  universalMockBackend: 'local' | 'central';
   onUniversalMockApply: (columns: UniversalMockColumns | null) => void;
 }) {
   return (
@@ -60,6 +62,7 @@ export function MainMenuScreen({
         activeColumns={universalMockColumns}
         pending={universalMockPending}
         message={universalMockMessage}
+        backend={universalMockBackend}
         onApply={onUniversalMockApply}
       />
       <div

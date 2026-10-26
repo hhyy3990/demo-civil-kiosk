@@ -153,10 +153,15 @@ function App() {
       ? { mode: 'bottom', heightPercent: devViewportPercent }
       : accessibilityProfile.viewportMode,
   }), [accessibilityProfile, accessibilityProfileApplied, devViewportPercent]);
+  const universalLayoutBackend = import.meta.env.DEV
+    && new URLSearchParams(window.location.search).get('universal-layout') === 'central'
+    ? 'central'
+    : 'local';
   const universalLayoutMock = useEnvironmentUniversalLayoutMock({
     enabled: import.meta.env.DEV,
     step,
     profile: layoutAccessibilityProfile,
+    backend: universalLayoutBackend,
   });
   const reset = useCallback(() => {
     try {
@@ -278,6 +283,7 @@ function App() {
                 universalMockColumns={universalLayoutMock.columns}
                 universalMockPending={universalLayoutMock.pending}
                 universalMockMessage={universalLayoutMock.message}
+                universalMockBackend={universalLayoutBackend}
                 onUniversalMockApply={universalLayoutMock.apply}
               />
             )}
