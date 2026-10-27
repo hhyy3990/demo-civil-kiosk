@@ -202,20 +202,22 @@ test('central HTTP diagnostics distinguish errors without forwarding response de
   });
 
   await t.test('maps upstream authentication errors without forwarding response details', async () => {
-    const diagnostics: unknown[] = [];
-    const forward = createCentralPlanForwarder(relayConfig, async () => new Response(
-      JSON.stringify({ error: 'private-auth-detail' }),
-      { status: 401, headers: { 'Content-Type': 'application/json' } },
-    ), (diagnostic) => diagnostics.push(diagnostic));
-    const result = await forward(relayInput());
-    assert.equal(result.status, 502);
-    assert.deepEqual(result.body, { accepted: false, error: 'CENTRAL_AUTH_FAILED' });
-    assert.deepEqual(diagnostics, [{
-      event: 'response',
-      status: 401,
-      contentType: 'application/json',
-    }]);
-    assert.equal(JSON.stringify(diagnostics).includes('private-auth-detail'), false);
+    for (const status of [401, 403]) {
+      const diagnostics: unknown[] = [];
+      const forward = createCentralPlanForwarder(relayConfig, async () => new Response(
+        JSON.stringify({ error: 'private-auth-detail' }),
+        { status, headers: { 'Content-Type': 'application/json' } },
+      ), (diagnostic) => diagnostics.push(diagnostic));
+      const result = await forward(relayInput());
+      assert.equal(result.status, 502);
+      assert.deepEqual(result.body, { accepted: false, error: 'CENTRAL_AUTH_FAILED' });
+      assert.deepEqual(diagnostics, [{
+        event: 'response',
+        status,
+        contentType: 'application/json',
+      }]);
+      assert.equal(JSON.stringify(diagnostics).includes('private-auth-detail'), false);
+    }
   });
 
   await t.test('logs HTML status and Content-Type without reading or logging its body', async () => {
@@ -331,18 +333,24 @@ test('off mode does not contact upstream and the plugin has no Vite preview regi
 });
 
 test('the relay refuses production and non-Replit URL targets without fetching', async () => {
-  let upstreamCalls = 0;
-  const forward = createCentralPlanForwarder({
-    ...relayConfig,
-    developmentUrl: 'https://civil-kiosk.replit.app',
-  }, async () => {
-    upstreamCalls += 1;
-    return new Response('{}', { status: 200, headers: { 'Content-Type': 'application/json' } });
-  });
-  const result = await forward(relayInput());
-  assert.equal(result.status, 503);
-  assert.deepEqual(result.body, { accepted: false, error: 'CENTRAL_RELAY_NOT_CONFIGURED' });
-  assert.equal(upstreamCalls, 0);
+  for (const developmentUrl of [
+    'https://civil-kiosk.replit.app',
+    'https://central-dev.example.replit.dev/api/dev/universal-layout/plan',
+    'https://example.com',
+  ]) {
+    let upstreamCalls = 0;
+    const forward = createCentralPlanForwarder({
+      ...relayConfig,
+      developmentUrl,
+    }, async () => {
+      upstreamCalls += 1;
+      return new Response('{}', { status: 200, headers: { 'Content-Type': 'application/json' } });
+    });
+    const result = await forward(relayInput());
+    assert.equal(result.status, 503);
+    assert.deepEqual(result.body, { accepted: false, error: 'CENTRAL_RELAY_NOT_CONFIGURED' });
+    assert.equal(upstreamCalls, 0);
+  }
 });
 
 test('simultaneous duplicate requests do not create a second upstream call', async () => {
