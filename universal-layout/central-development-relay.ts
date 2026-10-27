@@ -8,12 +8,37 @@ const endpointPath = '/api/dev/universal-layout/plan';
 const maxRequestBytes = 4096;
 const maxResponseBytes = 16_384;
 const requestTimeoutMs = 10_000;
+const safeCentralErrorCodes = new Set([
+  'INVALID_MODEL',
+  'UNSUPPORTED_HOST_SCREEN',
+  'POLICY_COMPONENT_INVALID',
+  'STRUCTURE_HASH_MISMATCH',
+  'CONSTRAINT_HASH_MISMATCH',
+  'COMPONENT_POLICY_MISMATCH',
+  'ACCESSIBILITY_CONSTRAINT_MISMATCH',
+  'PLAN_MODEL_MISMATCH',
+  'UNSUPPORTED_PLAN_OPERATION',
+  'DISALLOWED_COLUMN_COUNT',
+]);
+
+type CentralDiagnostic =
+  | {
+    event: 'response';
+    status: number;
+    contentType: string;
+    errorCode?: string;
+  }
+  | {
+    event: 'transport-error';
+    errorCode: 'CENTRAL_REQUEST_TIMEOUT' | 'CENTRAL_NETWORK_ERROR' | 'CLIENT_REQUEST_CANCELLED';
+  };
 
 type RelayConfig = {
   enabled: boolean;
   developmentUrl?: string;
   externalAccessToken?: string;
   serviceToken?: string;
+  requestTimeoutMs?: number;
 };
 
 type RelayResult = {
@@ -36,13 +61,14 @@ function record(value: unknown): Record<string, unknown> | null {
     : null;
 }
 
-function safeEndpoint(config: RelayConfig): URL | null {
-  if (!config.developmentUrl || !config.externalAccessToken) return null;
+function safeDevelopmentOrigin(value?: string): URL | null {
+  if (!value) return null;
   try {
-    const base = new URL(config.developmentUrl);
+    const base = new URL(value);
     if (
       base.protocol !== 'https:'
       || !base.hostname
+      || !base.hostname.endsWith('.replit.dev')
       || base.username
       || base.password
       || base.search
@@ -53,11 +79,68 @@ function safeEndpoint(config: RelayConfig): URL | null {
       || /^\d+(?:\.\d+){3}$/.test(base.hostname)
       || base.hostname.includes(':')
     ) return null;
-    const endpoint = new URL(endpointPath, base.origin);
-    endpoint.searchParams.set('project-protection-bypass', config.externalAccessToken);
-    return endpoint;
+    return base;
   } catch {
     return null;
+  }
+}
+
+function developmentUrlStatus(value?: string): 'missing' | 'invalid' | 'valid-development-origin' {
+  if (!value) return 'missing';
+  return safeDevelopmentOrigin(value) ? 'valid-development-origin' : 'invalid';
+}
+
+function safeEndpoint(config: RelayConfig): URL | null {
+  if (!config.externalAccessToken) return null;
+  const base = safeDevelopmentOrigin(config.developmentUrl);
+  if (!base) return null;
+  const endpoint = new URL(endpointPath, base.origin);
+  endpoint.searchParams.set('project-protection-bypass', config.externalAccessToken);
+  return endpoint;
+}
+
+function safeMediaType(headerValue: string | null): string {
+  if (!headerValue) return 'missing';
+  const mediaType = headerValue.split(';', 1)[0]?.trim().toLowerCase() ?? '';
+  return /^[a-z0-9!#$&^_.+-]+\/[a-z0-9!#$&^_.+-]+$/.test(mediaType)
+    ? mediaType
+    : 'invalid';
+}
+
+function isJsonMediaType(mediaType: string): boolean {
+  return mediaType === 'application/json' || mediaType.endsWith('+json');
+}
+
+async function safeErrorCode(response: Response, mediaType: string): Promise<string | undefined> {
+  if (!isJsonMediaType(mediaType)) {
+    try {
+      await response.body?.cancel();
+    } catch {
+      // Do not let diagnostic cleanup affect relay behavior.
+    }
+    return undefined;
+  }
+
+  try {
+    const body = record(await readLimitedJson(response));
+    const candidates = [body?.code, body?.errorCode, body?.error];
+    return candidates.find(
+      (candidate): candidate is string =>
+        typeof candidate === 'string' && safeCentralErrorCodes.has(candidate),
+    );
+  } catch {
+    return undefined;
+  }
+}
+
+function emitDiagnostic(
+  sink: ((diagnostic: CentralDiagnostic) => void) | undefined,
+  diagnostic: CentralDiagnostic,
+) {
+  try {
+    sink?.(diagnostic);
+  } catch {
+    // Diagnostics must never change whether a plan is accepted.
   }
 }
 
@@ -130,6 +213,7 @@ async function readLimitedJson(response: Response): Promise<unknown> {
 export function createCentralPlanForwarder(
   config: RelayConfig,
   fetchImpl: typeof fetch = fetch,
+  onDiagnostic?: (diagnostic: CentralDiagnostic) => void,
 ) {
   const inFlight = new Set<string>();
 
@@ -153,7 +237,11 @@ export function createCentralPlanForwarder(
     const abortForClient = () => controller.abort();
     if (clientSignal?.aborted) controller.abort();
     else clientSignal?.addEventListener('abort', abortForClient, { once: true });
-    const timeout = setTimeout(() => controller.abort(), requestTimeoutMs);
+    let timedOut = false;
+    const timeout = setTimeout(() => {
+      timedOut = true;
+      controller.abort();
+    }, config.requestTimeoutMs ?? requestTimeoutMs);
 
     try {
       const upstream = await fetchImpl(endpoint, {
@@ -168,8 +256,16 @@ export function createCentralPlanForwarder(
         body: JSON.stringify({ model: parsed.model }),
         signal: controller.signal,
       });
+      const contentType = safeMediaType(upstream.headers.get('content-type'));
 
       if (!upstream.ok) {
+        const errorCode = await safeErrorCode(upstream, contentType);
+        emitDiagnostic(onDiagnostic, {
+          event: 'response',
+          status: upstream.status,
+          contentType,
+          ...(errorCode ? { errorCode } : {}),
+        });
         if (upstream.status === 401 || upstream.status === 403) {
           return { status: 502, body: { accepted: false, error: 'CENTRAL_AUTH_FAILED' } };
         }
@@ -184,14 +280,32 @@ export function createCentralPlanForwarder(
 
       let plan: UniversalLayoutPlan;
       try {
+        if (!isJsonMediaType(contentType)) throw new Error('INVALID_CONTENT_TYPE');
         const responseBody: unknown = await readLimitedJson(upstream);
         plan = validateUniversalLayoutPlan(responseBody, parsed.model, [civilLayoutMockPolicies.standard]);
       } catch {
+        emitDiagnostic(onDiagnostic, {
+          event: 'response',
+          status: upstream.status,
+          contentType,
+          errorCode: 'INVALID_CENTRAL_PLAN',
+        });
         return { status: 502, body: { accepted: false, error: 'INVALID_CENTRAL_PLAN' } };
       }
 
+      emitDiagnostic(onDiagnostic, {
+        event: 'response',
+        status: upstream.status,
+        contentType,
+      });
       return { status: 200, body: { accepted: true, plan } };
     } catch {
+      const errorCode = clientSignal?.aborted
+        ? 'CLIENT_REQUEST_CANCELLED'
+        : timedOut
+          ? 'CENTRAL_REQUEST_TIMEOUT'
+          : 'CENTRAL_NETWORK_ERROR';
+      emitDiagnostic(onDiagnostic, { event: 'transport-error', errorCode });
       return {
         status: controller.signal.aborted ? 504 : 502,
         body: { accepted: false, error: controller.signal.aborted ? 'CENTRAL_REQUEST_TIMEOUT' : 'CENTRAL_PLAN_FAILED' },
@@ -300,7 +414,23 @@ export function createCentralDevelopmentRelayPlugin(
   return {
     name: 'civil-kiosk-universal-layout-central-development-relay',
     configureServer(server) {
+      const targetStatus = developmentUrlStatus(config.developmentUrl);
+      server.config.logger.info(
+        `[civil-universal-layout] relay=${enabled ? 'on' : 'off'} target-format=${targetStatus}`,
+      );
       if (!enabled) return;
+      const forward = createCentralPlanForwarder(config, fetch, (diagnostic) => {
+        if (diagnostic.event === 'response') {
+          server.config.logger.info(
+            `[civil-universal-layout] upstream-status=${diagnostic.status} content-type=${diagnostic.contentType}`
+            + (diagnostic.errorCode ? ` error-code=${diagnostic.errorCode}` : ''),
+          );
+          return;
+        }
+        server.config.logger.info(
+          `[civil-universal-layout] upstream-transport=${diagnostic.errorCode}`,
+        );
+      });
       server.middlewares.use(centralRelayMiddleware(forward));
     },
   };
