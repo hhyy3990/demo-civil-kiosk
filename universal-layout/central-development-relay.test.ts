@@ -50,11 +50,15 @@ const relayConfig = {
 test('the central relay sends the strict model envelope and validates the top-level golden response', async () => {
   const expected = createValidatedCivilLayoutMock(hostRequest()).model;
   const localPlan = createValidatedCivilLayoutMock(hostRequest()).plan;
+  let upstreamCalls = 0;
   let observedUrl: URL | undefined;
+  let observedMethod: string | undefined;
   let observedHeaders: Headers | undefined;
   let observedBody: unknown;
   const forward = createCentralPlanForwarder(relayConfig, async (input, init) => {
+    upstreamCalls += 1;
     observedUrl = new URL(String(input));
+    observedMethod = init?.method;
     observedHeaders = new Headers(init?.headers);
     observedBody = JSON.parse(String(init?.body));
     return new Response(JSON.stringify(localPlan), {
@@ -67,7 +71,12 @@ test('the central relay sends the strict model envelope and validates the top-le
 
   assert.equal(result.status, 200);
   assert.deepEqual(result.body, { accepted: true, plan: localPlan });
+  assert.equal(upstreamCalls, 1);
+  assert.equal(observedMethod, 'POST');
+  assert.equal(observedUrl?.origin, new URL(relayConfig.developmentUrl).origin);
   assert.equal(observedUrl?.pathname, '/api/dev/universal-layout/plan');
+  assert.deepEqual(observedUrl?.searchParams.getAll('project-protection-bypass').length, 1);
+  assert.deepEqual([...observedUrl!.searchParams.keys()], ['project-protection-bypass']);
   assert.equal(observedUrl?.searchParams.get('project-protection-bypass'), relayConfig.externalAccessToken);
   assert.equal(observedHeaders?.get('authorization'), `Bearer ${relayConfig.serviceToken}`);
   assert.equal(observedHeaders?.get('content-type'), 'application/json');
@@ -181,6 +190,9 @@ test('central HTTP diagnostics distinguish errors without forwarding response de
       errorCode: 'INVALID_MODEL',
     }]);
     assert.equal(JSON.stringify(diagnostics).includes('private upstream detail'), false);
+    assert.equal(JSON.stringify(diagnostics).includes(relayConfig.developmentUrl), false);
+    assert.equal(JSON.stringify(diagnostics).includes(relayConfig.externalAccessToken), false);
+    assert.equal(JSON.stringify(diagnostics).includes(relayConfig.serviceToken), false);
   });
 
   await t.test('keeps 404 and 422 distinguishable in server diagnostics', async () => {
