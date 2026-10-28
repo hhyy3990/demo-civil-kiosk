@@ -41,7 +41,7 @@ type RelayConfig = {
   requestTimeoutMs?: number;
 };
 
-type RelayResult = {
+export type RelayResult = {
   status: number;
   body: Record<string, unknown>;
 };
@@ -144,7 +144,7 @@ function emitDiagnostic(
   }
 }
 
-function parseRequestModel(input: unknown) {
+export function parseStandardCivilRequestModel(input: unknown) {
   const envelope = relayEnvelopeSchema.safeParse(input);
   if (!envelope.success) {
     return { ok: false as const, result: { status: 400, body: { accepted: false, error: 'INVALID_RELAY_REQUEST' } } };
@@ -224,7 +224,7 @@ export function createCentralPlanForwarder(
     const endpoint = safeEndpoint(config);
     if (!endpoint) return { status: 503, body: { accepted: false, error: 'CENTRAL_RELAY_NOT_CONFIGURED' } };
 
-    const parsed = parseRequestModel(input);
+    const parsed = parseStandardCivilRequestModel(input);
     if (!parsed.ok) return parsed.result;
 
     const requestKey = parsed.model.constraintHash + parsed.model.structureHash;

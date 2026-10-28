@@ -32,7 +32,7 @@ export function MainMenuScreen({
   universalMockColumns: UniversalMockColumns | null;
   universalMockPending: boolean;
   universalMockMessage: string;
-  universalMockBackend: 'local' | 'central';
+  universalMockBackend: 'local' | 'central' | 'openai';
   onUniversalMockApply: (columns: UniversalMockColumns | null) => void;
 }) {
   return (

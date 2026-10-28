@@ -7,6 +7,7 @@ import {
   UniversalLayoutValidationError,
 } from './universal-layout/civil-layout-mock.js';
 import { createCentralDevelopmentRelayPlugin } from './universal-layout/central-development-relay.js';
+import { createCentralOpenAiDevelopmentRelayPlugin } from './universal-layout/central-openai-development-relay.js';
 
 const replitHosts = [
   process.env.REPLIT_DEV_DOMAIN,
@@ -172,6 +173,7 @@ export default defineConfig({
     qrProfileRelayPlugin,
     universalLayoutMockPlugin,
     createCentralDevelopmentRelayPlugin(),
+    createCentralOpenAiDevelopmentRelayPlugin(),
   ],
   server: {
     host: '0.0.0.0',

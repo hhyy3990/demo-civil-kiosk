@@ -153,10 +153,14 @@ function App() {
       ? { mode: 'bottom', heightPercent: devViewportPercent }
       : accessibilityProfile.viewportMode,
   }), [accessibilityProfile, accessibilityProfileApplied, devViewportPercent]);
-  const universalLayoutBackend = import.meta.env.DEV
-    && new URLSearchParams(window.location.search).get('universal-layout') === 'central'
+  const universalLayoutMode = import.meta.env.DEV
+    ? new URLSearchParams(window.location.search).get('universal-layout')
+    : null;
+  const universalLayoutBackend = universalLayoutMode === 'central'
     ? 'central'
-    : 'local';
+    : universalLayoutMode === 'openai'
+      ? 'openai'
+      : 'local';
   const universalLayoutMock = useEnvironmentUniversalLayoutMock({
     enabled: import.meta.env.DEV,
     step,

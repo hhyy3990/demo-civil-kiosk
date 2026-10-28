@@ -7,7 +7,7 @@ import type { UniversalLayoutPlan } from '../universal-layout/universal-layout-c
 import type { KioskStep } from './useKioskAccessibility';
 
 type MockColumns = 1 | 2;
-type LayoutBackend = 'local' | 'central';
+type LayoutBackend = 'local' | 'central' | 'openai';
 
 type MockState = {
   plan: UniversalLayoutPlan | null;
@@ -215,7 +215,9 @@ export function useUniversalLayoutMock({
       const response = await fetch(
         backend === 'central'
           ? '/api/dev/universal-layout/plan'
-          : '/api/dev/universal-layout/mock',
+          : backend === 'openai'
+            ? '/api/dev/universal-layout/openai-plan'
+            : '/api/dev/universal-layout/mock',
         {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
@@ -276,7 +278,9 @@ export function useUniversalLayoutMock({
         pending: false,
         message: backend === 'central'
           ? `중앙 Development Mock이 ${payload.plan.operations[0]?.type === 'setColumns' ? payload.plan.operations[0].columns : ''}열 계획을 검증했습니다.`
-          : `${columns}열 로컬 Development Mock이 공통 계약 검증을 통과했습니다.`,
+          : backend === 'openai'
+            ? `중앙 OpenAI Development 계획이 공통 검증을 통과했습니다.`
+            : `${columns}열 로컬 Development Mock이 공통 계약 검증을 통과했습니다.`,
       });
     } catch {
       if (requestId !== requestSequence.current || contextKey !== getContextKey(step, profile, backend)) return;
@@ -285,7 +289,9 @@ export function useUniversalLayoutMock({
         contextKey,
         message: backend === 'central'
           ? '중앙 Development 중계를 사용할 수 없어 기존 배치를 유지합니다.'
-          : '개발 Mock 서버에 연결할 수 없어 기본 배치를 유지합니다.',
+          : backend === 'openai'
+            ? 'OpenAI Development 중계를 사용할 수 없어 기존 배치를 유지합니다.'
+            : '개발 Mock 서버에 연결할 수 없어 기본 배치를 유지합니다.',
       });
     } finally {
       if (requestId === requestSequence.current) {
