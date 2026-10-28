@@ -34,3 +34,8 @@ externalPort = 3001
 
 [nix]
 channel = "stable-25_05"
+
+[userenv]
+
+[userenv.development]
+CIVIL_UNIVERSAL_LAYOUT_V2_CENTRAL_RELAY_ENABLED = "false"
