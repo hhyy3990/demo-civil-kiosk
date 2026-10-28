@@ -453,7 +453,11 @@ export function useUniversalLayoutV2Fake({
           controllerRef.current = null;
         }
         setState((currentState) => {
-          if (!currentState.pending || currentState.contextKey !== context.key) {
+          if (
+            generation.current !== requestGeneration
+            || !currentState.pending
+            || currentState.contextKey !== context.key
+          ) {
             return currentState;
           }
           return { ...currentState, plan: null, pending: false, message: '' };
