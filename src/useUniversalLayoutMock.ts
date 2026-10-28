@@ -60,7 +60,7 @@ function measureCentralEligibility(profile: AccessibilityProfile) {
 
 function getContextKey(step: KioskStep, profile: AccessibilityProfile, backend: LayoutBackend) {
   const grid = document.querySelector<HTMLElement>('.certificate-grid');
-  const centralEligibility = backend === 'central' ? measureCentralEligibility(profile) : null;
+  const relayEligibility = backend === 'local' ? null : measureCentralEligibility(profile);
   return JSON.stringify({
     backend,
     screenId: `civil.${step}`,
@@ -76,7 +76,7 @@ function getContextKey(step: KioskStep, profile: AccessibilityProfile, backend: 
       bottomControls: profile.bottomControls,
       viewportMode: profile.viewportMode,
     },
-    centralEligibility,
+    relayEligibility,
   });
 }
 
@@ -159,13 +159,13 @@ export function useUniversalLayoutMock({
     }
 
     const contextKey = getContextKey(step, profile, backend);
-    const centralEligibility = backend === 'central' ? measureCentralEligibility(profile) : null;
+    const relayEligibility = backend === 'local' ? null : measureCentralEligibility(profile);
     if (
-      backend === 'central'
+      backend !== 'local'
       && (
-        !centralEligibility?.standardProfile
-        || !centralEligibility.geometryKnown
-        || centralEligibility.hasFixedBottomControls
+        !relayEligibility?.standardProfile
+        || !relayEligibility.geometryKnown
+        || relayEligibility.hasFixedBottomControls
         || window.innerWidth <= 520
         || profile.bottomControls
         || profile.viewportMode !== null
@@ -226,9 +226,14 @@ export function useUniversalLayoutMock({
         body: JSON.stringify(backend === 'central'
           ? {
               request: hostRequest,
-              eligibility: centralEligibility,
+              eligibility: relayEligibility,
             }
-          : hostRequest),
+          : backend === 'openai'
+            ? {
+                request: hostRequest,
+                eligibility: relayEligibility,
+              }
+            : hostRequest),
       });
       const payload: unknown = await response.json().catch(() => null);
 
