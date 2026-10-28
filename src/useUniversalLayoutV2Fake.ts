@@ -449,7 +449,15 @@ export function useUniversalLayoutV2Fake({
     } finally {
       if (generation.current === requestGeneration) {
         pendingRef.current = false;
-        controllerRef.current = null;
+        if (controllerRef.current === controller) {
+          controllerRef.current = null;
+        }
+        setState((currentState) => {
+          if (!currentState.pending || currentState.contextKey !== context.key) {
+            return currentState;
+          }
+          return { ...currentState, plan: null, pending: false, message: '' };
+        });
       }
     }
   }, [backend, cancel, enabled, profile, step]);
