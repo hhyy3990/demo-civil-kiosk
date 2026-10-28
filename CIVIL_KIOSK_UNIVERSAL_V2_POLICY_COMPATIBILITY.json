@@ -1,0 +1,393 @@
+{
+  "report": {
+    "title": "Civil Kiosk Universal v2 Policy Compatibility",
+    "scope": "Local Development source and live DOM extraction only",
+    "externalCentralApiCalled": false,
+    "openAiCalled": false,
+    "personalOrIssuanceDataIncluded": false
+  },
+  "localDevelopment": {
+    "activation": "Development only; Vite configureServer middleware; browser query parameter universal-layout=v2",
+    "endpoint": "POST /api/dev/universal-layout/v2-fake",
+    "contract": {
+      "schemaVersion": 2,
+      "contractVersion": "universal-layout.v2",
+      "validator": "Copied Universal v2 schema and validators under universal-layout/v2/server; no live central request was made"
+    },
+    "host": {
+      "hostId": "civil-kiosk-development-test",
+      "screenId": "civil.main-menu",
+      "structureVersion": "civil-main-menu.v2-test",
+      "componentId": "civil.certificate-grid"
+    },
+    "componentPolicy": {
+      "kind": "repeated-card-list",
+      "role": "certificate-choice-list",
+      "order": 0,
+      "itemCountRange": [
+        18,
+        18
+      ],
+      "allowedColumnsByViewport": {
+        "compact": [
+          1
+        ],
+        "regular": [
+          1,
+          2
+        ],
+        "wide": [
+          1,
+          2
+        ]
+      },
+      "singleColumnForLargeText": true,
+      "singleColumnForLargeButtons": true,
+      "singleColumnForHighContrast": true,
+      "singleColumnForBottomViewport": true,
+      "operations": [
+        "setColumns"
+      ],
+      "minimumTouchTargetPx": 44,
+      "protectedProperties": [
+        "items",
+        "order",
+        "selection",
+        "issuance-actions"
+      ]
+    },
+    "optionPolicy": {
+      "groupId": "arrangement",
+      "optionId": "reserved-safe-list",
+      "requiresCapabilities": [
+        "reserved-bottom-controls"
+      ],
+      "optionDeclaresCssValues": false,
+      "hostOwnsCssPreset": true
+    },
+    "capabilityPolicy": {
+      "allowedCapability": "reserved-bottom-controls",
+      "rule": {
+        "componentIds": [
+          "civil.certificate-grid"
+        ],
+        "maximumColumns": 1
+      },
+      "actualDetection": {
+        "capabilityPresentWhen": "visible footer is in normal flow OR a visible fixed/sticky QR dock intersects the viewport",
+        "footerSelector": ".device-footer[data-a11y-slot=\"bottom-controls\"]",
+        "footerInFlow": "visible and computed position is neither fixed nor sticky",
+        "qrDockSelector": ".a11y-qr-entry-dock",
+        "qrDockReservesBottom": "visible, fixed/sticky, has nonzero dimensions, and intersects the viewport",
+        "observedAt1080x1920": {
+          "footerVisible": true,
+          "footerInFlow": true,
+          "qrDockVisible": true,
+          "qrDockReservesBottom": true,
+          "capabilityIncluded": true
+        }
+      }
+    },
+    "live1080x1920Snapshot": {
+      "screen": "civil.main-menu",
+      "viewport": {
+        "width": 1080,
+        "height": 1920
+      },
+      "viewportClass": "wide",
+      "gridWidthPx": 470,
+      "accessibility": {
+        "textScale": "standard",
+        "buttonScale": "standard",
+        "contrast": "standard",
+        "viewportMode": null
+      },
+      "dom": {
+        "certificateGrid": {
+          "selector": ".certificate-grid",
+          "left": 305,
+          "top": 822,
+          "right": 775,
+          "bottom": 1241,
+          "width": 470,
+          "height": 419,
+          "position": "static"
+        },
+        "footer": {
+          "selector": ".device-footer[data-a11y-slot=\"bottom-controls\"]",
+          "left": 280,
+          "top": 1290,
+          "right": 800,
+          "bottom": 1382,
+          "width": 520,
+          "height": 92,
+          "position": "static"
+        },
+        "qrDock": {
+          "selector": ".a11y-qr-entry-dock",
+          "left": 0,
+          "top": 1848,
+          "right": 1080,
+          "bottom": 1920,
+          "width": 1080,
+          "height": 72,
+          "position": "fixed"
+        }
+      }
+    },
+    "orderedItems": [
+      {
+        "id": "civil.certificate.01",
+        "label": "주민등록"
+      },
+      {
+        "id": "civil.certificate.02",
+        "label": "지적, 토지, 건축"
+      },
+      {
+        "id": "civil.certificate.03",
+        "label": "차량"
+      },
+      {
+        "id": "civil.certificate.04",
+        "label": "보건복지"
+      },
+      {
+        "id": "civil.certificate.05",
+        "label": "농지대장, 농업경영체"
+      },
+      {
+        "id": "civil.certificate.06",
+        "label": "가족관계등록부"
+      },
+      {
+        "id": "civil.certificate.07",
+        "label": "제적부"
+      },
+      {
+        "id": "civil.certificate.08",
+        "label": "병적증명서"
+      },
+      {
+        "id": "civil.certificate.09",
+        "label": "지방세"
+      },
+      {
+        "id": "civil.certificate.10",
+        "label": "어선원부"
+      },
+      {
+        "id": "civil.certificate.11",
+        "label": "부동산등기사항증명서"
+      },
+      {
+        "id": "civil.certificate.12",
+        "label": "교육제증명"
+      },
+      {
+        "id": "civil.certificate.13",
+        "label": "국세증명"
+      },
+      {
+        "id": "civil.certificate.14",
+        "label": "건강보험"
+      },
+      {
+        "id": "civil.certificate.15",
+        "label": "고용·산재보험"
+      },
+      {
+        "id": "civil.certificate.16",
+        "label": "여권"
+      },
+      {
+        "id": "civil.certificate.17",
+        "label": "국민연금"
+      },
+      {
+        "id": "civil.certificate.18",
+        "label": "교통(경찰청)"
+      }
+    ],
+    "hashing": {
+      "canonicalization": "canonicalUniversalJson recursively normalizes object keys to NFC, sorts object keys lexicographically, preserves array order, rejects unsafe integers and unsupported values, then JSON.stringify is hashed as UTF-8 SHA-256 lowercase hex",
+      "itemOrderHashInput": {
+        "orderedItemIds": "the exact 18-item ordered ID array above"
+      },
+      "structureHashInputs": [
+        "schemaVersion",
+        "contractVersion",
+        "hostId",
+        "screenId",
+        "structureVersion",
+        "components sorted by order then id, each projected to id, kind, role, order, itemCount, itemOrderHash"
+      ],
+      "constraintHashInputs": [
+        "schemaVersion",
+        "contractVersion",
+        "viewportClass",
+        "accessibility",
+        "sorted layoutCapabilities",
+        "allowedOperations",
+        "components sorted by order then id, each projected to id, operations, allowedColumns, minimumTouchTargetPx, protectedProperties, optionGroups when present"
+      ],
+      "liveModelHashes": {
+        "itemOrderHash": "1f984cacde0e9014a80a73b90f15ea8a2ca3002ee5a1a65b737cd8fe11e9342c",
+        "structureHash": "5ee50fd98eb1ba357232fbc21a39c78b1721925491635b9943a7027cab4eed0b",
+        "constraintHash": "285382bce15365551f61890fc36ae5e66f8d225bd8592e4385197e44aebb1c69"
+      }
+    },
+    "liveModel": {
+      "schemaVersion": 2,
+      "contractVersion": "universal-layout.v2",
+      "hostId": "civil-kiosk-development-test",
+      "screenId": "civil.main-menu",
+      "structureVersion": "civil-main-menu.v2-test",
+      "structureHash": "5ee50fd98eb1ba357232fbc21a39c78b1721925491635b9943a7027cab4eed0b",
+      "constraintHash": "285382bce15365551f61890fc36ae5e66f8d225bd8592e4385197e44aebb1c69",
+      "viewportClass": "wide",
+      "accessibility": {
+        "textScale": "standard",
+        "buttonScale": "standard",
+        "contrast": "standard",
+        "viewportMode": null
+      },
+      "layoutCapabilities": [
+        "reserved-bottom-controls"
+      ],
+      "components": [
+        {
+          "id": "civil.certificate-grid",
+          "kind": "repeated-card-list",
+          "role": "certificate-choice-list",
+          "order": 0,
+          "itemCount": 18,
+          "itemOrderHash": "1f984cacde0e9014a80a73b90f15ea8a2ca3002ee5a1a65b737cd8fe11e9342c",
+          "operations": [
+            "setColumns",
+            "selectLayoutOption"
+          ],
+          "allowedColumns": [
+            1
+          ],
+          "optionGroups": [
+            {
+              "id": "arrangement",
+              "optionIds": [
+                "reserved-safe-list"
+              ]
+            }
+          ],
+          "minimumTouchTargetPx": 44,
+          "protectedProperties": [
+            "items",
+            "order",
+            "selection",
+            "issuance-actions"
+          ]
+        }
+      ],
+      "allowedOperations": [
+        "setColumns",
+        "selectLayoutOption"
+      ]
+    },
+    "localFakePlan": {
+      "schemaVersion": 2,
+      "contractVersion": "universal-layout.v2",
+      "hostId": "civil-kiosk-development-test",
+      "screenId": "civil.main-menu",
+      "structureVersion": "civil-main-menu.v2-test",
+      "structureHash": "5ee50fd98eb1ba357232fbc21a39c78b1721925491635b9943a7027cab4eed0b",
+      "constraintHash": "285382bce15365551f61890fc36ae5e66f8d225bd8592e4385197e44aebb1c69",
+      "viewportClass": "wide",
+      "operations": [
+        {
+          "type": "selectLayoutOption",
+          "targetId": "civil.certificate-grid",
+          "groupId": "arrangement",
+          "optionId": "reserved-safe-list"
+        }
+      ]
+    },
+    "cssPreset": {
+      "source": "src/universal-layout-mock.css",
+      "columns": "grid-template-columns: minmax(0, 1fr)",
+      "gapPx": 4,
+      "categoryButtonMinHeightPx": 44,
+      "categoryButtonPaddingBlockPx": 4
+    },
+    "hostSafetyGuards": {
+      "minimumViewportWidthPx": 760,
+      "requiresAll18ExpectedIdsInOrder": true,
+      "requiresVisibleInFlowFooter": true,
+      "rejectsMenuFooterOverlap": true,
+      "rejectsMenuQrDockOverlap": true,
+      "requiresRenderedButtonHeightAtLeastPx": 44,
+      "stalePlanInvalidatedBy": [
+        "screen change",
+        "viewport change",
+        "accessibility profile change",
+        "measured geometry change"
+      ]
+    }
+  },
+  "centralRegistryComparison": {
+    "source": "Registry details supplied in the user request; no central registry/API was queried",
+    "providedRecord": {
+      "hostId": "civil-kiosk-mock",
+      "screenId": "civil.main-menu",
+      "componentId": "civil.certificate-grid",
+      "option": "reserved-safe-list",
+      "hostPolicyVerified": false
+    },
+    "fieldComparison": {
+      "hostId": {
+        "local": "civil-kiosk-development-test",
+        "registry": "civil-kiosk-mock",
+        "matches": false
+      },
+      "screenId": {
+        "local": "civil.main-menu",
+        "registry": "civil.main-menu",
+        "matches": true
+      },
+      "componentId": {
+        "local": "civil.certificate-grid",
+        "registry": "civil.certificate-grid",
+        "matches": true
+      },
+      "optionId": {
+        "local": "reserved-safe-list",
+        "registry": "reserved-safe-list",
+        "matches": true
+      },
+      "structureVersion": {
+        "local": "civil-main-menu.v2-test",
+        "registry": null,
+        "matches": null,
+        "note": "Not included in the registry details supplied"
+      },
+      "hostPolicyVerified": {
+        "registry": false,
+        "local": "Local Development policy exists and passed the copied local v2 validator",
+        "centralVerification": "Not established"
+      }
+    },
+    "compatibility": "Partial identifier match, not a verified registry match. The local hostId differs. Registry-side capability requirements, structureVersion, hashes, policy reconstruction, and validator acceptance remain unconfirmed.",
+    "contractVersionAssessment": "The local copied v2 contract declares schemaVersion 2 and contractVersion universal-layout.v2. These are the local contract identifiers; live central compatibility was not tested.",
+    "doNotChangeLocalPolicyToMatchFixture": true
+  },
+  "sourceReferences": [
+    "universal-layout/civil-layout-v2-fake-constants.ts",
+    "universal-layout/civil-layout-v2-fake.ts",
+    "universal-layout/civil-layout-v2-fake-relay.ts",
+    "universal-layout/v2/server/universal-layout-contract-v2.ts",
+    "universal-layout/v2/server/universal-layout-contract.ts",
+    "src/useUniversalLayoutV2Fake.ts",
+    "src/components/KioskScreens.tsx",
+    "src/App.tsx",
+    "src/universal-layout-mock.css",
+    "vite.config.ts"
+  ]
+}
