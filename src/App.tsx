@@ -23,6 +23,7 @@ import {
 import { QrSetupModal } from './components/QrSetupModal';
 import { BottomViewportTestControls } from './components/BottomViewportTestControls';
 import { useUniversalLayoutMock } from './useUniversalLayoutMock';
+import { useUniversalLayoutV2Fake } from './useUniversalLayoutV2Fake';
 import { useKioskAccessibility, type KioskStep } from './useKioskAccessibility';
 import '@naebangsik/kiosk-accessibility-sdk/styles.css';
 import './styles.css';
@@ -156,16 +157,22 @@ function App() {
   const universalLayoutMode = import.meta.env.DEV
     ? new URLSearchParams(window.location.search).get('universal-layout')
     : null;
+  const showUniversalV2Controls = universalLayoutMode === 'v2';
   const universalLayoutBackend = universalLayoutMode === 'central'
     ? 'central'
     : universalLayoutMode === 'openai'
       ? 'openai'
       : 'local';
   const universalLayoutMock = useEnvironmentUniversalLayoutMock({
-    enabled: import.meta.env.DEV,
+    enabled: import.meta.env.DEV && !showUniversalV2Controls,
     step,
     profile: layoutAccessibilityProfile,
     backend: universalLayoutBackend,
+  });
+  const universalLayoutV2Fake = useUniversalLayoutV2Fake({
+    enabled: import.meta.env.DEV && showUniversalV2Controls,
+    step,
+    profile: layoutAccessibilityProfile,
   });
   const reset = useCallback(() => {
     try {
@@ -289,6 +296,11 @@ function App() {
                 universalMockMessage={universalLayoutMock.message}
                 universalMockBackend={universalLayoutBackend}
                 onUniversalMockApply={universalLayoutMock.apply}
+                showUniversalV2Controls={showUniversalV2Controls}
+                universalV2OptionId={universalLayoutV2Fake.activeOptionId}
+                universalV2Pending={universalLayoutV2Fake.pending}
+                universalV2Message={universalLayoutV2Fake.message}
+                onUniversalV2Apply={universalLayoutV2Fake.apply}
               />
             )}
             {step === 'resident-type' && <ResidentTypeScreen onSelectCopy={() => setStep('resident-number')} onUnavailable={() => setNotice('주민등록표(초본)은 현재 준비 중입니다. 데모에서는 등본 발급을 이용해 주십시오.')}/>}

@@ -3,6 +3,7 @@ import {
   UniversalLayoutMockControls,
   type UniversalMockColumns,
 } from './UniversalLayoutMockControls';
+import { UniversalLayoutV2FakeControls } from './UniversalLayoutV2FakeControls';
 
 export type IssueOptions = {
   address: boolean;
@@ -25,6 +26,11 @@ export function MainMenuScreen({
   universalMockMessage,
   universalMockBackend,
   onUniversalMockApply,
+  showUniversalV2Controls,
+  universalV2OptionId,
+  universalV2Pending,
+  universalV2Message,
+  onUniversalV2Apply,
 }: {
   onSelectCategory: (category: string) => void;
   showDevAccessibilityExperience: boolean;
@@ -34,6 +40,11 @@ export function MainMenuScreen({
   universalMockMessage: string;
   universalMockBackend: 'local' | 'central' | 'openai';
   onUniversalMockApply: (columns: UniversalMockColumns | null) => void;
+  showUniversalV2Controls: boolean;
+  universalV2OptionId: string | null;
+  universalV2Pending: boolean;
+  universalV2Message: string;
+  onUniversalV2Apply: (optionId: 'reserved-safe-list' | null) => void;
 }) {
   return (
     <section className="screen-view main-view">
@@ -58,18 +69,28 @@ export function MainMenuScreen({
           <ChevronRight size={18} aria-hidden="true" />
         </button>
       )}
-      <UniversalLayoutMockControls
-        activeColumns={universalMockColumns}
-        pending={universalMockPending}
-        message={universalMockMessage}
-        backend={universalMockBackend}
-        onApply={onUniversalMockApply}
+      {!showUniversalV2Controls && (
+        <UniversalLayoutMockControls
+          activeColumns={universalMockColumns}
+          pending={universalMockPending}
+          message={universalMockMessage}
+          backend={universalMockBackend}
+          onApply={onUniversalMockApply}
+        />
+      )}
+      <UniversalLayoutV2FakeControls
+        enabled={showUniversalV2Controls}
+        activeOptionId={universalV2OptionId}
+        pending={universalV2Pending}
+        message={universalV2Message}
+        onApply={onUniversalV2Apply}
       />
       <div
         className="certificate-grid"
         aria-label="증명서 종류"
         data-a11y-grid
         data-universal-columns={universalMockColumns ?? undefined}
+        data-universal-layout-option={universalV2OptionId ?? undefined}
       >
         {certificateCategories.map((category, index) => <button key={category} id={index === 0 ? 'main-resident-button' : `certificate-category-${index + 1}`} data-a11y-action-id={import.meta.env.DEV ? `civil.certificate.${String(index + 1).padStart(2, '0')}` : undefined} data-a11y-menu-item className={`category-button ${index === 0 ? 'category-active' : ''}`} onClick={() => onSelectCategory(category)}>
           <span className="category-number">{String(index + 1).padStart(2, '0')}</span><span className="category-name">{category}</span><ChevronRight size={16} className="category-arrow" />

@@ -8,3 +8,5 @@
 .universal-layout-mock-status {color:#536c77}
 .certificate-grid[data-universal-columns="1"] {grid-template-columns:repeat(1,minmax(0,1fr))}
 .certificate-grid[data-universal-columns="2"] {grid-template-columns:repeat(2,minmax(0,1fr))}
+.certificate-grid[data-universal-layout-option="reserved-safe-list"] {grid-template-columns:minmax(0,1fr);gap:4px}
+.certificate-grid[data-universal-layout-option="reserved-safe-list"] .category-button {min-height:44px;padding-block:4px}

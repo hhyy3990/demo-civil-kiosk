@@ -8,6 +8,7 @@ import {
 } from './universal-layout/civil-layout-mock.js';
 import { createCentralDevelopmentRelayPlugin } from './universal-layout/central-development-relay.js';
 import { createCentralOpenAiDevelopmentRelayPlugin } from './universal-layout/central-openai-development-relay.js';
+import { civilLayoutV2FakePlugin } from './universal-layout/civil-layout-v2-fake-relay.js';
 
 const replitHosts = [
   process.env.REPLIT_DEV_DOMAIN,
@@ -172,6 +173,7 @@ export default defineConfig({
     react(),
     qrProfileRelayPlugin,
     universalLayoutMockPlugin,
+    civilLayoutV2FakePlugin,
     createCentralDevelopmentRelayPlugin(),
     createCentralOpenAiDevelopmentRelayPlugin(),
   ],
