@@ -27,6 +27,7 @@ export function MainMenuScreen({
   universalMockBackend,
   onUniversalMockApply,
   showUniversalV2Controls,
+  universalV2Backend,
   universalV2OptionId,
   universalV2Pending,
   universalV2Message,
@@ -41,6 +42,7 @@ export function MainMenuScreen({
   universalMockBackend: 'local' | 'central' | 'openai';
   onUniversalMockApply: (columns: UniversalMockColumns | null) => void;
   showUniversalV2Controls: boolean;
+  universalV2Backend: 'local-fake' | 'central-fake';
   universalV2OptionId: string | null;
   universalV2Pending: boolean;
   universalV2Message: string;
@@ -80,6 +82,7 @@ export function MainMenuScreen({
       )}
       <UniversalLayoutV2FakeControls
         enabled={showUniversalV2Controls}
+        backend={universalV2Backend}
         activeOptionId={universalV2OptionId}
         pending={universalV2Pending}
         message={universalV2Message}

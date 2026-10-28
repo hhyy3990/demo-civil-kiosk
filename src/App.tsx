@@ -157,7 +157,8 @@ function App() {
   const universalLayoutMode = import.meta.env.DEV
     ? new URLSearchParams(window.location.search).get('universal-layout')
     : null;
-  const showUniversalV2Controls = universalLayoutMode === 'v2';
+  const showUniversalV2Controls = universalLayoutMode === 'v2' || universalLayoutMode === 'v2-central';
+  const universalV2Backend = universalLayoutMode === 'v2-central' ? 'central-fake' : 'local-fake';
   const universalLayoutBackend = universalLayoutMode === 'central'
     ? 'central'
     : universalLayoutMode === 'openai'
@@ -173,6 +174,7 @@ function App() {
     enabled: import.meta.env.DEV && showUniversalV2Controls,
     step,
     profile: layoutAccessibilityProfile,
+    backend: universalV2Backend,
   });
   const reset = useCallback(() => {
     try {
@@ -297,6 +299,7 @@ function App() {
                 universalMockBackend={universalLayoutBackend}
                 onUniversalMockApply={universalLayoutMock.apply}
                 showUniversalV2Controls={showUniversalV2Controls}
+                universalV2Backend={universalV2Backend}
                 universalV2OptionId={universalLayoutV2Fake.activeOptionId}
                 universalV2Pending={universalLayoutV2Fake.pending}
                 universalV2Message={universalLayoutV2Fake.message}

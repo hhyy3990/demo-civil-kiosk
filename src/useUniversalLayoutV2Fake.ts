@@ -1,5 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import type { AccessibilityProfile } from '@naebangsik/kiosk-accessibility-sdk';
+import {
+  DEFAULT_ACCESSIBILITY_PROFILE,
+  type AccessibilityProfile,
+} from '@naebangsik/kiosk-accessibility-sdk';
 import {
   CIVIL_V2_ITEM_IDS,
   CIVIL_V2_FAKE_HOST_ID,
@@ -19,9 +22,11 @@ type FakeState = {
   message: string;
 };
 
+type Backend = 'local-fake' | 'central-fake';
+
 type ContextSnapshot = {
   key: string;
-  request: ReturnType<typeof buildRequest>['request'];
+  request: unknown;
   reason: string | null;
 };
 
@@ -134,7 +139,7 @@ function readGeometry() {
   };
 }
 
-function buildRequest(profile: AccessibilityProfile) {
+function buildRequest(profile: AccessibilityProfile, backend: Backend) {
   const geometry = readGeometry();
   const grid = geometry.grid;
   const itemIds = grid
@@ -145,18 +150,41 @@ function buildRequest(profile: AccessibilityProfile) {
   const layoutCapabilities = (geometry.footerVisible && geometry.footerInFlow) || geometry.dockReservesBottom
     ? ['reserved-bottom-controls'] as const
     : [] as const;
-  return {
-    request: {
-      screenId: 'civil.main-menu' as const,
-      itemIds,
-      viewport: {
-        width: window.innerWidth,
-        height: window.innerHeight,
-        gridWidth: grid ? Math.floor(grid.getBoundingClientRect().width) : 0,
-      },
-      accessibility,
-      layoutCapabilities: [...layoutCapabilities],
+  const request = {
+    screenId: 'civil.main-menu' as const,
+    itemIds,
+    viewport: {
+      width: window.innerWidth,
+      height: window.innerHeight,
+      gridWidth: grid ? Math.floor(grid.getBoundingClientRect().width) : 0,
     },
+    accessibility,
+    layoutCapabilities: [...layoutCapabilities],
+  };
+  const eligibility = {
+    targetViewport: window.innerWidth === 1080 && window.innerHeight === 1920,
+    standardProfile: stableJson(profile) === stableJson(DEFAULT_ACCESSIBILITY_PROFILE),
+    geometryKnown: Boolean(grid && geometry.footer && geometry.dock && itemIds.length === 18),
+    footerInFlow: geometry.footerVisible && geometry.footerInFlow,
+    qrDockReservesBottom: geometry.dockReservesBottom,
+    menuClearOfFooter: !geometry.overlapWithFooter,
+    menuClearOfQrDock: !geometry.overlapWithDock,
+    minimumTouchTarget: geometry.minimumRenderedHeight >= 44,
+    reservedBottomCapability: layoutCapabilities.length > 0,
+  };
+  const centralReason = !eligibility.targetViewport
+    ? '중앙 v2 시험은 1080×1920 화면에서만 허용됩니다.'
+    : !eligibility.standardProfile
+      ? '중앙 v2 시험은 기본 접근성 프로필에서만 허용됩니다.'
+      : geometry.reason
+        ? geometry.reason
+        : !eligibility.qrDockReservesBottom
+          ? 'QR 도크의 고정 하단 영역을 확인할 수 없어 중앙 계획을 적용하지 않습니다.'
+          : !eligibility.reservedBottomCapability
+            ? 'reserved-bottom-controls capability를 확인할 수 없어 중앙 계획을 적용하지 않습니다.'
+            : null;
+  return {
+    request: backend === 'central-fake' ? { request, eligibility } : request,
     geometry: {
       footerPosition: geometry.footer ? window.getComputedStyle(geometry.footer).position : 'missing',
       footerRect: geometry.footerRect ? {
@@ -171,7 +199,7 @@ function buildRequest(profile: AccessibilityProfile) {
       dockPosition: geometry.dock ? window.getComputedStyle(geometry.dock).position : 'missing',
       itemHeight: Math.round(geometry.minimumRenderedHeight),
     },
-    reason: geometry.reason,
+    reason: backend === 'central-fake' ? centralReason : geometry.reason,
   };
 }
 
@@ -191,7 +219,12 @@ function isValidatedFakeEnvelope(value: unknown): value is {
   const operations = plan.operations;
   if (!Array.isArray(operations) || operations.length !== 1) return false;
   const operation = operations[0] as Record<string, unknown> | null;
-  return plan.schemaVersion === 2
+  return model.schemaVersion === 2
+    && model.contractVersion === 'universal-layout.v2'
+    && model.hostId === CIVIL_V2_FAKE_HOST_ID
+    && model.screenId === CIVIL_V2_SCREEN_ID
+    && model.structureVersion === CIVIL_V2_STRUCTURE_VERSION
+    && plan.schemaVersion === 2
     && plan.contractVersion === 'universal-layout.v2'
     && plan.hostId === CIVIL_V2_FAKE_HOST_ID
     && plan.screenId === CIVIL_V2_SCREEN_ID
@@ -206,11 +239,13 @@ function isValidatedFakeEnvelope(value: unknown): value is {
     && operation.optionId === CIVIL_V2_SAFE_LIST_OPTION_ID;
 }
 
-function readContext(step: KioskStep, profile: AccessibilityProfile): ContextSnapshot {
-  const built = buildRequest(profile);
+function readContext(step: KioskStep, profile: AccessibilityProfile, backend: Backend): ContextSnapshot {
+  const built = buildRequest(profile, backend);
   return {
     key: stableJson({
+      backend,
       step,
+      profile,
       request: built.request,
       geometry: built.geometry,
     }),
@@ -223,10 +258,12 @@ export function useUniversalLayoutV2Fake({
   enabled,
   step,
   profile,
+  backend = 'local-fake',
 }: {
   enabled: boolean;
   step: KioskStep;
   profile: AccessibilityProfile;
+  backend?: Backend;
 }) {
   const [state, setState] = useState<FakeState>(emptyState);
   const generation = useRef(0);
@@ -244,7 +281,7 @@ export function useUniversalLayoutV2Fake({
 
   useEffect(() => {
     cancel();
-  }, [cancel, enabled, profileKey, step]);
+  }, [backend, cancel, enabled, profileKey, step]);
 
   useEffect(() => {
     if (!enabled) return;
@@ -264,7 +301,7 @@ export function useUniversalLayoutV2Fake({
       return;
     }
 
-    const context = readContext(step, profile);
+    const context = readContext(step, profile, backend);
     if (context.reason) {
       setState({ ...emptyState, contextKey: context.key, message: context.reason });
       return;
@@ -278,11 +315,16 @@ export function useUniversalLayoutV2Fake({
       plan: null,
       contextKey: context.key,
       pending: true,
-      message: '첨부된 Universal v2 계약으로 로컬 Fake 계획을 검증하는 중입니다.',
+      message: backend === 'central-fake'
+        ? 'Development relay를 통해 중앙 Universal v2 Fake 계획을 확인하는 중입니다.'
+        : '첨부된 Universal v2 계약으로 로컬 Fake 계획을 검증하는 중입니다.',
     });
 
     try {
-      const response = await fetch('/api/dev/universal-layout/v2-fake', {
+      const endpoint = backend === 'central-fake'
+        ? '/api/dev/universal-layout/v2-central-plan'
+        : '/api/dev/universal-layout/v2-fake';
+      const response = await fetch(endpoint, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
         cache: 'no-store',
@@ -291,25 +333,37 @@ export function useUniversalLayoutV2Fake({
       });
       const payload: unknown = await response.json().catch(() => null);
       if (!response.ok || !isValidatedFakeEnvelope(payload)) {
-        throw new Error('INVALID_LOCAL_V2_PLAN');
+        const errorCode = typeof payload === 'object' && payload !== null
+          && typeof (payload as Record<string, unknown>).error === 'string'
+          ? (payload as Record<string, string>).error
+          : 'INVALID_V2_PLAN';
+        throw new Error(errorCode);
       }
-      const latest = readContext(step, profile);
+      const latest = readContext(step, profile, backend);
       if (latest.key !== context.key || generation.current !== requestGeneration) return;
 
       setState({
         plan: payload.plan,
         contextKey: context.key,
         pending: false,
-        message: '로컬 Development 정책으로 reserved-safe-list를 검증했습니다. 중앙 API와 AI는 호출하지 않았습니다.',
+        message: backend === 'central-fake'
+          ? '중앙 Development v2 Fake 계획이 현재 모델과 호스트 정책 검증을 통과했습니다.'
+          : '로컬 Development 정책으로 reserved-safe-list를 검증했습니다. 중앙 API와 AI는 호출하지 않았습니다.',
       });
-    } catch {
+    } catch (error) {
       if (controller.signal.aborted) return;
-      const latest = readContext(step, profile);
+      const latest = readContext(step, profile, backend);
       if (latest.key !== context.key || generation.current !== requestGeneration) return;
+      const errorCode = error instanceof Error ? error.message : 'INVALID_V2_PLAN';
+      const message = backend === 'central-fake'
+        ? errorCode === 'RELAY_DISABLED'
+          ? '중앙 v2 Development relay가 OFF입니다. 로컬 Fake 또는 기존 배치를 사용하세요.'
+          : '중앙 v2 Development 계획을 받지 못했거나 검증에 실패했습니다. 기존 배치를 유지합니다.'
+        : 'v2 Fake 계획이 공통 정책 검증을 통과하지 못해 기존 배치를 유지합니다.';
       setState({
         ...emptyState,
         contextKey: context.key,
-        message: 'v2 Fake 계획이 공통 정책 검증을 통과하지 못해 기존 배치를 유지합니다.',
+        message,
       });
     } finally {
       if (generation.current === requestGeneration) {
@@ -317,9 +371,9 @@ export function useUniversalLayoutV2Fake({
         controllerRef.current = null;
       }
     }
-  }, [cancel, enabled, profile, step]);
+  }, [backend, cancel, enabled, profile, step]);
 
-  const currentContext = readContext(step, profile);
+  const currentContext = readContext(step, profile, backend);
   const activePlan = enabled
     && step === 'main-menu'
     && state.contextKey === currentContext.key
