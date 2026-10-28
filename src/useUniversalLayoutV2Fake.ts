@@ -12,6 +12,11 @@ import {
   CIVIL_V2_SCREEN_ID,
   CIVIL_V2_STRUCTURE_VERSION,
 } from '../universal-layout/civil-layout-v2-fake-constants';
+import {
+  civilV2HostSafetyMessage,
+  getCivilV2HostSafetyFailure,
+  type CivilV2HostEligibility,
+} from '../universal-layout/civil-layout-v2-host-safety';
 import type { UniversalLayoutV2Plan } from '../universal-layout/v2/universal-v2-contract-export';
 import type { KioskStep } from './useKioskAccessibility';
 
@@ -51,95 +56,156 @@ function mapAccessibilityProfile(profile: AccessibilityProfile) {
   } as const;
 }
 
-function readGeometry() {
-  const grid = document.querySelector<HTMLElement>('.certificate-grid');
-  const footer = document.querySelector<HTMLElement>('.device-footer[data-a11y-slot="bottom-controls"]');
-  const dock = document.querySelector<HTMLElement>('.a11y-qr-entry-dock');
-  const actions = grid
-    ? Array.from(grid.querySelectorAll<HTMLElement>('[data-a11y-action-id]'))
-    : [];
-  const gridRect = grid?.getBoundingClientRect();
-  const footerRect = footer?.getBoundingClientRect();
-  const dockRect = dock?.getBoundingClientRect();
-  const footerStyle = footer ? window.getComputedStyle(footer) : null;
-  const footerVisible = Boolean(
-    footer
-    && footer.isConnected
-    && footerStyle?.display !== 'none'
-    && footerStyle?.visibility !== 'hidden'
-    && Number(footerStyle?.opacity ?? 0) !== 0
-    && footerRect
-    && footerRect.width > 0
-    && footerRect.height > 0,
-  );
-  const footerInFlow = Boolean(
-    footerVisible
-    && footerStyle
-    && footerStyle.position !== 'fixed'
-    && footerStyle.position !== 'sticky',
-  );
-  const dockVisible = Boolean(
-    dock
-    && dock.isConnected
-    && dockRect
-    && dockRect.width > 0
-    && dockRect.height > 0
-    && window.getComputedStyle(dock).display !== 'none'
-    && window.getComputedStyle(dock).visibility !== 'hidden',
-  );
-  const dockStyle = dock ? window.getComputedStyle(dock) : null;
-  const dockReservesBottom = Boolean(
-    dockVisible
-    && dockStyle
-    && (dockStyle.position === 'fixed' || dockStyle.position === 'sticky')
-    && dockRect
-    && dockRect.bottom > 0
-    && dockRect.top < window.innerHeight,
-  );
-  const intersects = (a: DOMRect, b: DOMRect) =>
-    a.left < b.right && a.right > b.left && a.top < b.bottom && a.bottom > b.top;
-  const allIdsMatch = actions.length === CIVIL_V2_ITEM_IDS.length
-    && actions.every((action, index) => action.dataset.a11yActionId === CIVIL_V2_ITEM_IDS[index]);
-  const minimumRenderedHeight = actions.length
-    ? Math.min(...actions.map((action) => action.getBoundingClientRect().height))
-    : 0;
-  const overlapWithFooter = Boolean(gridRect && footerVisible && footerRect && intersects(gridRect, footerRect));
-  const overlapWithDock = Boolean(gridRect && dockVisible && dockRect && intersects(gridRect, dockRect));
-  const viewportAllowed = window.innerWidth > 520 && window.innerWidth >= 760;
-  const reason = !viewportAllowed
-    ? '기존 모바일 적용 제한을 유지합니다. 760px 이상 화면에서만 이 Development preset을 시험할 수 있습니다.'
-    : !allIdsMatch
-      ? '증명서 18개 또는 메뉴 순서가 예상과 달라 기본 배치를 유지합니다.'
-      : !footerVisible || !footerInFlow
-        ? '하단 조작부의 실제 안전 영역을 확인할 수 없어 기본 배치를 유지합니다.'
-        : overlapWithFooter
-          ? '증명서 메뉴와 하단 조작부가 겹쳐 기본 배치를 유지합니다.'
-          : overlapWithDock
-            ? '증명서 메뉴와 QR 도크가 겹쳐 기본 배치를 유지합니다.'
-            : minimumRenderedHeight < 44
-              ? '실제 메뉴 터치 영역이 44px보다 작아 기본 배치를 유지합니다.'
-              : null;
+type GeometrySnapshot = {
+  grid: HTMLElement | null;
+  gridRect: DOMRect | null;
+  footer: HTMLElement | null;
+  footerRect: DOMRect | null;
+  footerPosition: string;
+  dock: HTMLElement | null;
+  dockRect: DOMRect | null;
+  dockPosition: string;
+  measurementsValid: boolean;
+  footerVisible: boolean;
+  footerInFlow: boolean;
+  dockVisible: boolean;
+  dockReservesBottom: boolean;
+  allIdsMatch: boolean;
+  minimumRenderedHeight: number;
+  overlapWithFooter: boolean;
+  overlapWithDock: boolean;
+};
 
+function hasUsableRect(rect: DOMRect | null | undefined): rect is DOMRect {
+  return Boolean(
+    rect
+    && [rect.left, rect.right, rect.top, rect.bottom, rect.width, rect.height].every(Number.isFinite)
+    && rect.width > 0
+    && rect.height > 0,
+  );
+}
+
+function unavailableGeometry(): GeometrySnapshot {
   return {
-    grid,
-    gridRect,
-    footer,
-    footerRect,
-    dock,
-    dockRect,
-    footerVisible,
-    footerInFlow,
-    dockVisible,
-    dockReservesBottom,
-    allIdsMatch,
-    minimumRenderedHeight,
-    overlapWithFooter,
-    overlapWithDock,
-    reason,
+    grid: null,
+    gridRect: null,
+    footer: null,
+    footerRect: null,
+    footerPosition: 'unavailable',
+    dock: null,
+    dockRect: null,
+    dockPosition: 'unavailable',
+    measurementsValid: false,
+    footerVisible: false,
+    footerInFlow: false,
+    dockVisible: false,
+    dockReservesBottom: false,
+    allIdsMatch: false,
+    minimumRenderedHeight: 0,
+    overlapWithFooter: false,
+    overlapWithDock: false,
   };
 }
 
-function buildRequest(profile: AccessibilityProfile, backend: Backend) {
+function readGeometry(): GeometrySnapshot {
+  try {
+    const grid = document.querySelector<HTMLElement>('.certificate-grid');
+    const footer = document.querySelector<HTMLElement>('.device-footer[data-a11y-slot="bottom-controls"]');
+    const dock = document.querySelector<HTMLElement>('.a11y-qr-entry-dock');
+    const actions = grid
+      ? Array.from(grid.querySelectorAll<HTMLElement>('[data-a11y-action-id]'))
+      : [];
+    const gridRect = grid?.getBoundingClientRect() ?? null;
+    const footerRect = footer?.getBoundingClientRect() ?? null;
+    const dockRect = dock?.getBoundingClientRect() ?? null;
+    const footerStyle = footer ? window.getComputedStyle(footer) : null;
+    const dockStyle = dock ? window.getComputedStyle(dock) : null;
+    const footerOpacity = Number.parseFloat(footerStyle?.opacity ?? '');
+    const dockOpacity = Number.parseFloat(dockStyle?.opacity ?? '');
+    const footerVisible = Boolean(
+      footer?.isConnected
+      && footerStyle?.display !== 'none'
+      && footerStyle?.visibility !== 'hidden'
+      && footerStyle?.visibility !== 'collapse'
+      && Number.isFinite(footerOpacity)
+      && footerOpacity > 0
+      && hasUsableRect(footerRect),
+    );
+    const footerInFlow = Boolean(
+      footerVisible
+      && footerStyle
+      && footerStyle.position !== 'fixed'
+      && footerStyle.position !== 'sticky',
+    );
+    const dockVisible = Boolean(
+      dock?.isConnected
+      && dockStyle?.display !== 'none'
+      && dockStyle?.visibility !== 'hidden'
+      && dockStyle?.visibility !== 'collapse'
+      && Number.isFinite(dockOpacity)
+      && dockOpacity > 0
+      && hasUsableRect(dockRect),
+    );
+    const dockReservesBottom = Boolean(
+      dockVisible
+      && dockStyle
+      && (dockStyle.position === 'fixed' || dockStyle.position === 'sticky')
+      && dockRect
+      && dockRect.bottom > 0
+      && dockRect.top < window.innerHeight,
+    );
+    const allIdsMatch = actions.length === CIVIL_V2_ITEM_IDS.length
+      && actions.every((action, index) => action.dataset.a11yActionId === CIVIL_V2_ITEM_IDS[index]);
+    const actionRects = actions.map((action) => action.getBoundingClientRect());
+    const measurementsValid = Boolean(
+      grid?.isConnected
+      && footer?.isConnected
+      && dock?.isConnected
+      && hasUsableRect(gridRect)
+      && hasUsableRect(footerRect)
+      && hasUsableRect(dockRect)
+      && actionRects.length === CIVIL_V2_ITEM_IDS.length
+      && actionRects.every(hasUsableRect),
+    );
+    const minimumRenderedHeight = actionRects.length && actionRects.every(hasUsableRect)
+      ? Math.min(...actionRects.map((rect) => rect.height))
+      : 0;
+    const intersects = (a: DOMRect, b: DOMRect) =>
+      a.left < b.right && a.right > b.left && a.top < b.bottom && a.bottom > b.top;
+    const overlapWithFooter = Boolean(
+      hasUsableRect(gridRect) && footerVisible && hasUsableRect(footerRect)
+      && intersects(gridRect, footerRect),
+    );
+    const overlapWithDock = Boolean(
+      hasUsableRect(gridRect) && dockVisible && hasUsableRect(dockRect)
+      && intersects(gridRect, dockRect),
+    );
+
+    return {
+      grid,
+      gridRect,
+      footer,
+      footerRect,
+      footerPosition: footerStyle?.position ?? 'missing',
+      dock,
+      dockRect,
+      dockPosition: dockStyle?.position ?? 'missing',
+      measurementsValid,
+      footerVisible,
+      footerInFlow,
+      dockVisible,
+      dockReservesBottom,
+      allIdsMatch,
+      minimumRenderedHeight,
+      overlapWithFooter,
+      overlapWithDock,
+    };
+  } catch {
+    return unavailableGeometry();
+  }
+}
+
+function buildRequest(step: KioskStep, profile: AccessibilityProfile, backend: Backend) {
   const geometry = readGeometry();
   const grid = geometry.grid;
   const itemIds = grid
@@ -147,59 +213,73 @@ function buildRequest(profile: AccessibilityProfile, backend: Backend) {
         element.dataset.a11yActionId ?? '')
     : [];
   const accessibility = mapAccessibilityProfile(profile);
-  const layoutCapabilities = (geometry.footerVisible && geometry.footerInFlow) || geometry.dockReservesBottom
+  const reservedBottomCapability = geometry.footerVisible
+    && geometry.footerInFlow
+    && geometry.dockVisible
+    && geometry.dockReservesBottom;
+  const layoutCapabilities = reservedBottomCapability
     ? ['reserved-bottom-controls'] as const
     : [] as const;
   const request = {
-    screenId: 'civil.main-menu' as const,
+    screenId: CIVIL_V2_SCREEN_ID,
     itemIds,
     viewport: {
       width: window.innerWidth,
       height: window.innerHeight,
-      gridWidth: grid ? Math.floor(grid.getBoundingClientRect().width) : 0,
+      gridWidth: geometry.gridRect ? Math.floor(geometry.gridRect.width) : 0,
     },
     accessibility,
     layoutCapabilities: [...layoutCapabilities],
   };
-  const eligibility = {
-    targetViewport: window.innerWidth === 1080 && window.innerHeight === 1920,
-    standardProfile: stableJson(profile) === stableJson(DEFAULT_ACCESSIBILITY_PROFILE),
-    geometryKnown: Boolean(grid && geometry.footer && geometry.dock && itemIds.length === 18),
-    footerInFlow: geometry.footerVisible && geometry.footerInFlow,
+  const screenIsMainMenu = step === 'main-menu'
+    && document.querySelector<HTMLElement>('.screen-content[data-screen="main-menu"]')?.isConnected === true;
+  const eligibility: CivilV2HostEligibility = {
+    screenIsMainMenu,
+    viewportAllowed: window.innerWidth > 520 && window.innerWidth >= 760,
+    geometryKnown: geometry.measurementsValid && geometry.allIdsMatch,
+    footerVisible: geometry.footerVisible,
+    footerInFlow: geometry.footerInFlow,
+    qrDockVisible: geometry.dockVisible,
     qrDockReservesBottom: geometry.dockReservesBottom,
     menuClearOfFooter: !geometry.overlapWithFooter,
     menuClearOfQrDock: !geometry.overlapWithDock,
-    minimumTouchTarget: geometry.minimumRenderedHeight >= 44,
-    reservedBottomCapability: layoutCapabilities.length > 0,
+    minimumTouchTargetPx: geometry.minimumRenderedHeight,
+    reservedBottomCapability,
+    targetViewport: window.innerWidth === 1080 && window.innerHeight === 1920,
+    standardProfile: stableJson(profile) === stableJson(DEFAULT_ACCESSIBILITY_PROFILE),
   };
+  const commonSafetyFailure = getCivilV2HostSafetyFailure(request, eligibility);
+  const commonSafetyReason = commonSafetyFailure
+    ? civilV2HostSafetyMessage(commonSafetyFailure)
+    : null;
   const centralReason = !eligibility.targetViewport
     ? '중앙 v2 시험은 1080×1920 화면에서만 허용됩니다.'
     : !eligibility.standardProfile
       ? '중앙 v2 시험은 기본 접근성 프로필에서만 허용됩니다.'
-      : geometry.reason
-        ? geometry.reason
-        : !eligibility.qrDockReservesBottom
-          ? 'QR 도크의 고정 하단 영역을 확인할 수 없어 중앙 계획을 적용하지 않습니다.'
-          : !eligibility.reservedBottomCapability
-            ? 'reserved-bottom-controls capability를 확인할 수 없어 중앙 계획을 적용하지 않습니다.'
-            : null;
+      : commonSafetyReason;
   return {
-    request: backend === 'central-fake' ? { request, eligibility } : request,
+    request: { request, eligibility },
+    eligibility,
     geometry: {
-      footerPosition: geometry.footer ? window.getComputedStyle(geometry.footer).position : 'missing',
+      footerPosition: geometry.footerPosition,
       footerRect: geometry.footerRect ? {
+        left: Math.round(geometry.footerRect.left),
+        right: Math.round(geometry.footerRect.right),
         top: Math.round(geometry.footerRect.top),
         bottom: Math.round(geometry.footerRect.bottom),
         height: Math.round(geometry.footerRect.height),
       } : null,
       dockRect: geometry.dockVisible && geometry.dockRect ? {
+        left: Math.round(geometry.dockRect.left),
+        right: Math.round(geometry.dockRect.right),
         top: Math.round(geometry.dockRect.top),
         bottom: Math.round(geometry.dockRect.bottom),
       } : null,
-      dockPosition: geometry.dock ? window.getComputedStyle(geometry.dock).position : 'missing',
+      dockPosition: geometry.dockPosition,
       itemHeight: Math.round(geometry.minimumRenderedHeight),
+      measurementsValid: geometry.measurementsValid,
     },
-    reason: backend === 'central-fake' ? centralReason : geometry.reason,
+    reason: backend === 'central-fake' ? centralReason : commonSafetyReason,
   };
 }
 
@@ -240,13 +320,14 @@ function isValidatedFakeEnvelope(value: unknown): value is {
 }
 
 function readContext(step: KioskStep, profile: AccessibilityProfile, backend: Backend): ContextSnapshot {
-  const built = buildRequest(profile, backend);
+  const built = buildRequest(step, profile, backend);
   return {
     key: stableJson({
       backend,
       step,
       profile,
       request: built.request,
+      eligibility: built.eligibility,
       geometry: built.geometry,
     }),
     request: built.request,

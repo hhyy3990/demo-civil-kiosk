@@ -17,6 +17,10 @@ import {
   civilLayoutV2FakePolicies,
   createValidatedCivilLayoutV2Fake,
 } from './civil-layout-v2-fake.js';
+import {
+  civilV2CentralEligibilitySchema,
+  getCivilV2HostSafetyFailure,
+} from './civil-layout-v2-host-safety.js';
 
 const endpointPath = '/api/dev/universal-layout/v2-central-plan';
 const centralEndpointPath = '/api/dev/universal-layout/v2/fake-plan';
@@ -76,21 +80,9 @@ const safeFetchErrorNames = new Set([
   'AggregateError',
 ]);
 
-const eligibilitySchema = z.object({
-  targetViewport: z.literal(true),
-  standardProfile: z.literal(true),
-  geometryKnown: z.literal(true),
-  footerInFlow: z.literal(true),
-  qrDockReservesBottom: z.literal(true),
-  menuClearOfFooter: z.literal(true),
-  menuClearOfQrDock: z.literal(true),
-  minimumTouchTarget: z.literal(true),
-  reservedBottomCapability: z.literal(true),
-}).strict();
-
 const centralRelayRequestSchema = z.object({
   request: z.unknown(),
-  eligibility: eligibilitySchema,
+  eligibility: civilV2CentralEligibilitySchema,
 }).strict();
 
 type CentralRelayConfig = {
@@ -313,6 +305,13 @@ function createModelFromRelayRequest(input: unknown):
   const viewport = record(request?.viewport);
   const accessibility = record(request?.accessibility);
   const layoutCapabilities = request?.layoutCapabilities;
+  const safetyFailure = getCivilV2HostSafetyFailure(
+    request,
+    envelope.data.eligibility,
+  );
+  if (safetyFailure) {
+    return { ok: false, result: { status: 409, body: { accepted: false, error: safetyFailure } } };
+  }
   if (
     !request
     || !viewport

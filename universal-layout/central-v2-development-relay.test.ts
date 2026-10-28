@@ -27,14 +27,18 @@ const request = {
 } as const;
 
 const eligibility = {
+  screenIsMainMenu: true,
+  viewportAllowed: true,
   targetViewport: true,
   standardProfile: true,
   geometryKnown: true,
+  footerVisible: true,
   footerInFlow: true,
+  qrDockVisible: true,
   qrDockReservesBottom: true,
   menuClearOfFooter: true,
   menuClearOfQrDock: true,
-  minimumTouchTarget: true,
+  minimumTouchTargetPx: 44,
   reservedBottomCapability: true,
 } as const;
 
@@ -114,6 +118,42 @@ test('v2 central relay rejects invalid host context before upstream access', asy
     ['capability', { ...relayRequest, request: { ...request, layoutCapabilities: [] } }],
     ['menu order', { ...relayRequest, request: { ...request, itemIds: [...CIVIL_V2_ITEM_IDS].reverse() } }],
     ['geometry claim', { ...relayRequest, eligibility: { ...eligibility, qrDockReservesBottom: false } }],
+    ['footer hidden', {
+      ...relayRequest,
+      eligibility: { ...eligibility, footerVisible: false, reservedBottomCapability: false },
+    }],
+    ['QR dock hidden', {
+      ...relayRequest,
+      eligibility: { ...eligibility, qrDockVisible: false, reservedBottomCapability: false },
+    }],
+    ['QR dock does not reserve bottom', {
+      ...relayRequest,
+      eligibility: { ...eligibility, qrDockReservesBottom: false, reservedBottomCapability: false },
+    }],
+    ['menu overlaps footer', {
+      ...relayRequest,
+      eligibility: { ...eligibility, menuClearOfFooter: false },
+    }],
+    ['menu overlaps QR dock', {
+      ...relayRequest,
+      eligibility: { ...eligibility, menuClearOfQrDock: false },
+    }],
+    ['touch target below 44px', {
+      ...relayRequest,
+      eligibility: { ...eligibility, minimumTouchTargetPx: 43 },
+    }],
+    ['measurement unavailable', {
+      ...relayRequest,
+      eligibility: { ...eligibility, geometryKnown: false },
+    }],
+    ['wrong screen state', {
+      ...relayRequest,
+      eligibility: { ...eligibility, screenIsMainMenu: false },
+    }],
+    ['local viewport disallowed', {
+      ...relayRequest,
+      eligibility: { ...eligibility, viewportAllowed: false },
+    }],
   ];
 
   for (const [name, input] of variants) {

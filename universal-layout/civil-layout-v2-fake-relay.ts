@@ -1,12 +1,21 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import type { Plugin } from 'vite';
+import { z } from 'zod';
 import {
   createValidatedCivilLayoutV2Fake,
 } from './civil-layout-v2-fake.js';
 import { UniversalLayoutV2ValidationError } from './v2/universal-v2-contract-export.js';
+import {
+  civilV2HostEligibilitySchema,
+  getCivilV2HostSafetyFailure,
+} from './civil-layout-v2-host-safety.js';
 
 const endpointPath = '/api/dev/universal-layout/v2-fake';
 const maxBodyBytes = 4096;
+const relayEnvelopeSchema = z.object({
+  request: z.unknown(),
+  eligibility: civilV2HostEligibilitySchema,
+}).strict();
 
 function sendJson(response: ServerResponse, status: number, value: unknown) {
   response.statusCode = status;
@@ -66,8 +75,20 @@ function civilLayoutV2FakeMiddleware() {
       });
     }
 
+    const envelope = relayEnvelopeSchema.safeParse(input);
+    if (!envelope.success) {
+      return sendJson(response, 400, { accepted: false, error: 'INVALID_FAKE_REQUEST' });
+    }
+    const safetyFailure = getCivilV2HostSafetyFailure(
+      envelope.data.request,
+      envelope.data.eligibility,
+    );
+    if (safetyFailure) {
+      return sendJson(response, 409, { accepted: false, error: safetyFailure });
+    }
+
     try {
-      const result = createValidatedCivilLayoutV2Fake(input);
+      const result = createValidatedCivilLayoutV2Fake(envelope.data.request);
       return sendJson(response, 200, {
         accepted: true,
         model: result.model,
