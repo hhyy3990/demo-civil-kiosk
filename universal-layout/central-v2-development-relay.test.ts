@@ -10,6 +10,7 @@ import {
 import {
   createCentralV2DevelopmentRelayPlugin,
   createCentralV2PlanForwarder,
+  formatCentralV2Diagnostic,
 } from './central-v2-development-relay';
 
 const request = {
@@ -65,6 +66,7 @@ function validFakeFetch(
 
 test('v2 central relay posts strict model envelope and validates the top-level plan', async () => {
   let calls = 0;
+  const diagnostics: Parameters<typeof formatCentralV2Diagnostic>[0][] = [];
   const { model } = createValidatedCivilLayoutV2Fake(request);
   const forward = createCentralV2PlanForwarder(
     fakeConfig,
@@ -84,12 +86,25 @@ test('v2 central relay posts strict model envelope and validates the top-level p
       assert.deepEqual(Object.keys(body), ['model']);
       assert.deepEqual(body.model, model);
     }),
+    (diagnostic) => diagnostics.push(diagnostic),
   );
 
   const result = await forward(relayRequest);
   assert.equal(calls, 1);
   assert.equal(result.status, 200);
   assert.deepEqual(result.body, { accepted: true, model, plan: centralPlan });
+  assert.deepEqual(
+    diagnostics.map(({ stage }) => stage),
+    ['browser-request', 'upstream-fetch-start', 'upstream-response'],
+  );
+  assert.equal(diagnostics.at(-1)?.responseReceived, true);
+  assert.equal(diagnostics.at(-1)?.status, 200);
+  assert.equal(diagnostics.at(-1)?.contentType, 'application/json');
+  assert.equal(diagnostics.at(-1)?.timeout, false);
+  assert.doesNotMatch(
+    diagnostics.map(formatCentralV2Diagnostic).join('\n'),
+    /central-civil-kiosk|test-protection-token|test-service-token|certificate-grid/,
+  );
 });
 
 test('v2 central relay rejects invalid host context before upstream access', async (t) => {
@@ -205,8 +220,120 @@ test('failed upstream attempts are not cached or retried', async () => {
   assert.doesNotMatch(serializedDiagnostics, /private upstream body|test-service-token|test-protection-token/);
 });
 
+test('fetch exceptions log only safe DNS, TCP, TLS, and redirect classifications', async (t) => {
+  const cases = [
+    ['DNS resolution', 'ENOTFOUND', false],
+    ['TCP connection', 'ECONNREFUSED', false],
+    ['TLS verification', 'ERR_TLS_CERT_ALTNAME_INVALID', false],
+    ['redirect rejection', 'UND_ERR_REDIRECT', true],
+  ] as const;
+
+  for (const [label, causeCode, redirectError] of cases) {
+    await t.test(label, async () => {
+      const diagnostics: Parameters<typeof formatCentralV2Diagnostic>[0][] = [];
+      const fakeFetch = async () => {
+        throw Object.assign(new TypeError('PRIVATE URL, TOKEN, AND ERROR MESSAGE'), {
+          cause: { code: causeCode, message: 'PRIVATE CAUSE MESSAGE' },
+        });
+      };
+      const forward = createCentralV2PlanForwarder(
+        fakeConfig,
+        fakeFetch as typeof fetch,
+        (diagnostic) => diagnostics.push(diagnostic),
+      );
+
+      const result = await forward(relayRequest);
+      assert.equal(result.status, 502);
+      assert.deepEqual(result.body, { accepted: false, error: 'CENTRAL_PLAN_FAILED' });
+      assert.equal((await forward(relayRequest)).status, 429);
+      const failure = diagnostics.find(({ stage }) => stage === 'upstream-fetch-error');
+      assert.ok(failure);
+      assert.equal(failure.responseReceived, false);
+      assert.equal(failure.errorOccurred, true);
+      assert.equal(failure.errorCode, 'CENTRAL_NETWORK_ERROR');
+      assert.equal(failure.errorName, 'TypeError');
+      assert.equal(failure.causeCode, causeCode);
+      assert.equal(failure.timeout, false);
+      assert.equal(failure.redirectError, redirectError);
+      assert.equal(diagnostics.at(-1)?.upstreamRequests, 1);
+
+      const safeLog = diagnostics.map(formatCentralV2Diagnostic).join('\n');
+      assert.doesNotMatch(safeLog, /PRIVATE|test-service-token|test-protection-token|replit\.dev|certificate-grid/);
+    });
+  }
+});
+
+test('unrecognized fetch error details are omitted and redirect classification stays unknown', async () => {
+  const diagnostics: Parameters<typeof formatCentralV2Diagnostic>[0][] = [];
+  const fakeFetch = async () => {
+    throw Object.assign(new TypeError('UNSAFE ERROR TEXT'), {
+      name: 'UNSAFE ERROR NAME',
+      cause: { code: 'UNSAFE_PRIVATE_CODE', message: 'UNSAFE CAUSE TEXT' },
+    });
+  };
+  const forward = createCentralV2PlanForwarder(
+    fakeConfig,
+    fakeFetch as typeof fetch,
+    (diagnostic) => diagnostics.push(diagnostic),
+  );
+
+  await forward(relayRequest);
+  const failure = diagnostics.find(({ stage }) => stage === 'upstream-fetch-error');
+  assert.ok(failure);
+  assert.equal(failure.errorName, 'Other');
+  assert.equal(failure.causeCode, undefined);
+  assert.equal(failure.redirectError, null);
+  assert.doesNotMatch(diagnostics.map(formatCentralV2Diagnostic).join('\n'), /UNSAFE/);
+});
+
+test('HTTP 401, 403, and 404 responses are logged without exposing response bodies', async (t) => {
+  const cases = [
+    [401, 502, 'CENTRAL_AUTH_FAILED'],
+    [403, 502, 'CENTRAL_AUTH_FAILED'],
+    [404, 422, 'CENTRAL_MODEL_REJECTED'],
+  ] as const;
+
+  for (const [upstreamStatus, hostStatus, hostError] of cases) {
+    await t.test(`upstream ${upstreamStatus}`, async () => {
+      let calls = 0;
+      const diagnostics: Parameters<typeof formatCentralV2Diagnostic>[0][] = [];
+      const upstreamBody = upstreamStatus === 404
+        ? { error: 'UNSUPPORTED_HOST_SCREEN' }
+        : { error: 'PRIVATE AUTH RESPONSE' };
+      const forward = createCentralV2PlanForwarder(
+        fakeConfig,
+        validFakeFetch(
+          () => { calls += 1; },
+          () => jsonResponse(upstreamBody, upstreamStatus),
+        ),
+        (diagnostic) => diagnostics.push(diagnostic),
+      );
+
+      const result = await forward(relayRequest);
+      assert.equal(calls, 1);
+      assert.equal(result.status, hostStatus);
+      assert.deepEqual(result.body, { accepted: false, error: hostError });
+      const response = diagnostics.find(({ stage }) => stage === 'upstream-response');
+      assert.ok(response);
+      assert.equal(response.responseReceived, true);
+      assert.equal(response.status, upstreamStatus);
+      assert.equal(response.contentType, 'application/json');
+      if (upstreamStatus === 404) {
+        assert.equal(
+          diagnostics.find(({ stage }) => stage === 'upstream-response-error-code')?.errorCode,
+          'UNSUPPORTED_HOST_SCREEN',
+        );
+      }
+      const safeLog = diagnostics.map(formatCentralV2Diagnostic).join('\n');
+      assert.doesNotMatch(safeLog, /PRIVATE AUTH RESPONSE/);
+      if (upstreamStatus === 404) assert.match(safeLog, /error-code=UNSUPPORTED_HOST_SCREEN/);
+    });
+  }
+});
+
 test('timeout consumes the single upstream attempt and is never retried', async () => {
   let calls = 0;
+  const diagnostics: Parameters<typeof formatCentralV2Diagnostic>[0][] = [];
   const forward = createCentralV2PlanForwarder(
     { ...fakeConfig, requestTimeoutMs: 5 },
     async (_input, init) => {
@@ -217,6 +344,7 @@ test('timeout consumes the single upstream attempt and is never retried', async 
         signal?.addEventListener('abort', () => reject(new Error('aborted')), { once: true });
       });
     },
+    (diagnostic) => diagnostics.push(diagnostic),
   );
 
   const result = await forward(relayRequest);
@@ -224,6 +352,10 @@ test('timeout consumes the single upstream attempt and is never retried', async 
   assert.deepEqual(result.body, { accepted: false, error: 'CENTRAL_REQUEST_TIMEOUT' });
   assert.equal((await forward(relayRequest)).status, 429);
   assert.equal(calls, 1);
+  const failure = diagnostics.find(({ stage }) => stage === 'upstream-fetch-error');
+  assert.equal(failure?.timeout, true);
+  assert.equal(failure?.errorCode, 'CENTRAL_REQUEST_TIMEOUT');
+  assert.equal(failure?.responseReceived, false);
 });
 
 test('relay OFF, invalid target, and missing credentials do not call upstream', async (t) => {
@@ -262,6 +394,7 @@ test('local Development plugin defaults OFF, conflicts with v1 relays, and is ab
   for (const [name, env] of cases) {
     await t.test(name, async () => {
       const plugin = createCentralV2DevelopmentRelayPlugin(env as NodeJS.ProcessEnv);
+      assert.equal(plugin.apply, 'serve');
       assert.equal(typeof plugin.configureServer, 'function');
       assert.equal(plugin.configurePreviewServer, undefined);
       let middleware: ((request: IncomingMessage, response: ServerResponse, next: (error?: unknown) => void) => void) | undefined;
@@ -295,4 +428,67 @@ test('local Development plugin defaults OFF, conflicts with v1 relays, and is ab
       assert.match(logged[0] ?? '', /central-relay=(off|blocked-conflict)/);
     });
   }
+});
+
+test('Production runtime installs no relay middleware or diagnostic logger', () => {
+  const plugin = createCentralV2DevelopmentRelayPlugin({
+    NODE_ENV: 'production',
+    CIVIL_UNIVERSAL_LAYOUT_V2_CENTRAL_RELAY_ENABLED: 'true',
+    CIVIL_UNIVERSAL_LAYOUT_CENTRAL_DEV_URL: 'https://central-civil-kiosk.replit.dev',
+    CIVIL_UNIVERSAL_LAYOUT_EXTERNAL_ACCESS_TOKEN: 'test-protection-token',
+    AI_LAYOUT_SERVICE_TOKEN: 'test-service-token',
+  });
+  assert.equal(plugin.apply, 'serve');
+
+  let middlewareInstalled = false;
+  const logged: string[] = [];
+  plugin.configureServer?.({
+    config: { logger: { info: (line: string) => logged.push(line) } },
+    middlewares: { use: () => { middlewareInstalled = true; } },
+  } as unknown as Parameters<NonNullable<Plugin['configureServer']>>[0]);
+
+  assert.equal(middlewareInstalled, false);
+  assert.deepEqual(logged, []);
+  assert.equal(plugin.configurePreviewServer, undefined);
+});
+
+test('Production Vite mode suppresses relay diagnostics even when NODE_ENV is development', () => {
+  const plugin = createCentralV2DevelopmentRelayPlugin({
+    NODE_ENV: 'development',
+    CIVIL_UNIVERSAL_LAYOUT_V2_CENTRAL_RELAY_ENABLED: 'true',
+  });
+  let middlewareInstalled = false;
+  const logged: string[] = [];
+  plugin.configureServer?.({
+    config: {
+      mode: 'production',
+      logger: { info: (line: string) => logged.push(line) },
+    },
+    middlewares: { use: () => { middlewareInstalled = true; } },
+  } as unknown as Parameters<NonNullable<Plugin['configureServer']>>[0]);
+
+  assert.equal(middlewareInstalled, false);
+  assert.deepEqual(logged, []);
+});
+
+test('Production runtime installs no relay middleware or diagnostic logger', () => {
+  const plugin = createCentralV2DevelopmentRelayPlugin({
+    NODE_ENV: 'production',
+    CIVIL_UNIVERSAL_LAYOUT_V2_CENTRAL_RELAY_ENABLED: 'true',
+    CIVIL_UNIVERSAL_LAYOUT_CENTRAL_DEV_URL: 'https://central-civil-kiosk.replit.dev',
+    CIVIL_UNIVERSAL_LAYOUT_EXTERNAL_ACCESS_TOKEN: 'test-protection-token',
+    AI_LAYOUT_SERVICE_TOKEN: 'test-service-token',
+  });
+  assert.equal(plugin.apply, 'serve');
+
+  let middlewareInstalled = false;
+  const logged: string[] = [];
+  plugin.configureServer?.({
+    config: { logger: { info: (line: string) => logged.push(line) } },
+    middlewares: { use: () => { middlewareInstalled = true; } },
+  } as unknown as Parameters<NonNullable<Plugin['configureServer']>>[0]);
+
+  assert.equal(middlewareInstalled, false);
+  assert.deepEqual(logged, []);
+  assert.equal(plugin.configurePreviewServer, undefined);
 });

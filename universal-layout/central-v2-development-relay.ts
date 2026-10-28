@@ -40,6 +40,42 @@ const safeCentralErrorCodes = new Set([
   'INVALID_OPTION_SELECTION',
 ]);
 
+const safeFetchCauseCodes = new Set([
+  'ENOTFOUND',
+  'EAI_AGAIN',
+  'ECONNREFUSED',
+  'ECONNRESET',
+  'ETIMEDOUT',
+  'EHOSTUNREACH',
+  'ENETUNREACH',
+  'EPIPE',
+  'CERT_HAS_EXPIRED',
+  'ERR_TLS_CERT_ALTNAME_INVALID',
+  'UNABLE_TO_VERIFY_LEAF_SIGNATURE',
+  'DEPTH_ZERO_SELF_SIGNED_CERT',
+  'ERR_SSL_WRONG_VERSION_NUMBER',
+  'ERR_SSL_TLSV1_ALERT_UNKNOWN_CA',
+  'UND_ERR_CONNECT_TIMEOUT',
+  'UND_ERR_HEADERS_TIMEOUT',
+  'UND_ERR_BODY_TIMEOUT',
+  'UND_ERR_SOCKET',
+  'ERR_HTTP_INVALID_REDIRECT',
+  'ERR_UNSUPPORTED_REDIRECT',
+  'UND_ERR_REDIRECT',
+]);
+const redirectCauseCodes = new Set([
+  'ERR_HTTP_INVALID_REDIRECT',
+  'ERR_UNSUPPORTED_REDIRECT',
+  'UND_ERR_REDIRECT',
+]);
+const safeFetchErrorNames = new Set([
+  'Error',
+  'TypeError',
+  'AbortError',
+  'DOMException',
+  'AggregateError',
+]);
+
 const eligibilitySchema = z.object({
   targetViewport: z.literal(true),
   standardProfile: z.literal(true),
@@ -67,11 +103,24 @@ type CentralRelayConfig = {
 };
 
 export type CentralV2Diagnostic = {
+  stage:
+    | 'browser-request'
+    | 'upstream-fetch-start'
+    | 'upstream-response'
+    | 'upstream-response-error-code'
+    | 'upstream-plan-rejected'
+    | 'upstream-fetch-error';
   browserRequests: number;
   upstreamRequests: number;
+  responseReceived?: boolean;
   status?: number;
   contentType?: string;
   errorCode?: string;
+  errorOccurred?: boolean;
+  errorName?: string;
+  causeCode?: string;
+  timeout?: boolean;
+  redirectError?: boolean | null;
 };
 
 export type CentralV2RelayResult = {
@@ -89,6 +138,59 @@ function record(value: unknown): Record<string, unknown> | null {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
     ? value as Record<string, unknown>
     : null;
+}
+
+function classifyFetchError(error: unknown, timedOut: boolean, responseReceived: boolean) {
+  try {
+    const errorRecord = record(error);
+    const rawName = typeof errorRecord?.name === 'string' ? errorRecord.name : '';
+    const errorName = safeFetchErrorNames.has(rawName) ? rawName : 'Other';
+    const cause = record(errorRecord?.cause);
+    const rawCode = typeof cause?.code === 'string' ? cause.code : '';
+    const causeCode = safeFetchCauseCodes.has(rawCode) ? rawCode : undefined;
+    const redirectError = responseReceived || timedOut
+      ? false
+      : redirectCauseCodes.has(rawCode)
+        ? true
+        : causeCode
+          ? false
+          : null;
+
+    return {
+      errorName,
+      ...(causeCode ? { causeCode } : {}),
+      timeout: timedOut,
+      redirectError,
+    };
+  } catch {
+    return {
+      errorName: 'Other',
+      timeout: timedOut,
+      redirectError: responseReceived || timedOut ? false : null,
+    };
+  }
+}
+
+export function formatCentralV2Diagnostic(diagnostic: CentralV2Diagnostic): string {
+  const fields = [
+    `[civil-universal-layout-v2] stage=${diagnostic.stage}`,
+    `browser-requests=${diagnostic.browserRequests}`,
+    `upstream-requests=${diagnostic.upstreamRequests}`,
+  ];
+  if (diagnostic.responseReceived !== undefined) {
+    fields.push(`response-received=${diagnostic.responseReceived ? 'yes' : 'no'}`);
+  }
+  if (diagnostic.status !== undefined) fields.push(`upstream-status=${diagnostic.status}`);
+  if (diagnostic.contentType !== undefined) fields.push(`content-type=${diagnostic.contentType}`);
+  if (diagnostic.errorCode) fields.push(`error-code=${diagnostic.errorCode}`);
+  if (diagnostic.errorOccurred !== undefined) fields.push(`error-occurred=${diagnostic.errorOccurred}`);
+  if (diagnostic.errorName) fields.push(`error-name=${diagnostic.errorName}`);
+  if (diagnostic.causeCode) fields.push(`cause-code=${diagnostic.causeCode}`);
+  if (diagnostic.timeout !== undefined) fields.push(`timeout=${diagnostic.timeout}`);
+  if (diagnostic.redirectError !== undefined) {
+    fields.push(`redirect-error=${diagnostic.redirectError === null ? 'unknown' : diagnostic.redirectError}`);
+  }
+  return fields.join(' ');
 }
 
 function safeDevelopmentOrigin(value?: string): URL | null {
@@ -270,12 +372,14 @@ export function createCentralV2PlanForwarder(
   let inFlight: { key: string; promise: Promise<CentralV2RelayResult> } | null = null;
   let cache: SuccessCacheEntry | null = null;
 
-  const reportCounts = (extra: Partial<CentralV2Diagnostic> = {}) =>
-    emitDiagnostic(onDiagnostic, { browserRequests, upstreamRequests, ...extra });
+  const reportCounts = (
+    stage: CentralV2Diagnostic['stage'],
+    extra: Omit<Partial<CentralV2Diagnostic>, 'stage'> = {},
+  ) => emitDiagnostic(onDiagnostic, { stage, browserRequests, upstreamRequests, ...extra });
 
   return async (input: unknown): Promise<CentralV2RelayResult> => {
     browserRequests += 1;
-    reportCounts();
+    reportCounts('browser-request');
 
     if (!config.enabled) return { status: 404, body: { accepted: false, error: 'RELAY_DISABLED' } };
     if (!config.serviceToken || !buildCentralEndpoint(config)) {
@@ -310,12 +414,16 @@ export function createCentralV2PlanForwarder(
     const promise = (async (): Promise<CentralV2RelayResult> => {
       const controller = new AbortController();
       let timedOut = false;
+      let responseReceived = false;
+      let responseStatus: number | undefined;
+      let responseContentType: string | undefined;
       const timeout = setTimeout(() => {
         timedOut = true;
         controller.abort();
       }, config.requestTimeoutMs ?? requestTimeoutMs);
 
       try {
+        reportCounts('upstream-fetch-start');
         const upstream = await fetchImpl(endpoint, {
           method: 'POST',
           headers: {
@@ -328,12 +436,29 @@ export function createCentralV2PlanForwarder(
           body: JSON.stringify({ model }),
           signal: controller.signal,
         });
+        responseReceived = true;
+        responseStatus = upstream.status;
         const contentType = safeMediaType(upstream.headers.get('content-type'));
+        responseContentType = contentType;
+        reportCounts('upstream-response', {
+          responseReceived: true,
+          status: upstream.status,
+          contentType,
+          timeout: false,
+        });
 
         if (!upstream.ok) {
           const errorCode = await safeCentralErrorCode(upstream, contentType);
           const result = mapCentralFailure(upstream.status);
-          reportCounts({ status: upstream.status, contentType, ...(errorCode ? { errorCode } : {}) });
+          if (errorCode) {
+            reportCounts('upstream-response-error-code', {
+              responseReceived: true,
+              status: upstream.status,
+              contentType,
+              errorCode,
+              timeout: false,
+            });
+          }
           return result;
         }
 
@@ -353,7 +478,13 @@ export function createCentralV2PlanForwarder(
             || plan.operations[0].optionId !== CIVIL_V2_SAFE_LIST_OPTION_ID
           ) throw new Error('UNEXPECTED_CENTRAL_PLAN');
         } catch {
-          reportCounts({ status: upstream.status, contentType, errorCode: 'INVALID_CENTRAL_PLAN' });
+          reportCounts('upstream-plan-rejected', {
+            responseReceived: true,
+            status: upstream.status,
+            contentType,
+            errorCode: 'INVALID_CENTRAL_PLAN',
+            timeout: false,
+          });
           return { status: 502, body: { accepted: false, error: 'INVALID_CENTRAL_PLAN' } };
         }
 
@@ -363,11 +494,22 @@ export function createCentralV2PlanForwarder(
           expiresAt: Date.now() + (config.successCacheMs ?? successCacheMs),
           result,
         };
-        reportCounts({ status: upstream.status, contentType });
         return result;
-      } catch {
+      } catch (error) {
         const errorCode = timedOut ? 'CENTRAL_REQUEST_TIMEOUT' : 'CENTRAL_NETWORK_ERROR';
-        reportCounts({ errorCode });
+        reportCounts('upstream-fetch-error', {
+          responseReceived,
+          ...(responseStatus !== undefined ? { status: responseStatus } : {}),
+          ...(responseContentType !== undefined ? { contentType: responseContentType } : {}),
+          errorCode,
+          errorOccurred: true,
+          ...classifyFetchError(
+            // Do not retain or emit the error message or stack; only allowlisted fields are extracted.
+            error,
+            timedOut,
+            responseReceived,
+          ),
+        });
         return {
           status: timedOut ? 504 : 502,
           body: { accepted: false, error: timedOut ? 'CENTRAL_REQUEST_TIMEOUT' : 'CENTRAL_PLAN_FAILED' },
@@ -469,11 +611,12 @@ function centralV2Middleware(forward: ReturnType<typeof createCentralV2PlanForwa
 export function createCentralV2DevelopmentRelayPlugin(
   env: NodeJS.ProcessEnv = process.env,
 ): Plugin {
+  const productionRuntime = env.NODE_ENV === 'production';
   const v1MockEnabled = env.CIVIL_UNIVERSAL_LAYOUT_CENTRAL_RELAY_ENABLED === 'true';
   const v1OpenAiEnabled = env.CIVIL_UNIVERSAL_LAYOUT_OPENAI_RELAY_ENABLED === 'true';
   const optIn = env.CIVIL_UNIVERSAL_LAYOUT_V2_CENTRAL_RELAY_ENABLED === 'true';
   const config: CentralV2RelayConfig = {
-    enabled: optIn && !v1MockEnabled && !v1OpenAiEnabled,
+    enabled: optIn && !productionRuntime && !v1MockEnabled && !v1OpenAiEnabled,
     developmentUrl: env.CIVIL_UNIVERSAL_LAYOUT_CENTRAL_DEV_URL,
     externalAccessToken: env.CIVIL_UNIVERSAL_LAYOUT_EXTERNAL_ACCESS_TOKEN,
     serviceToken: env.AI_LAYOUT_SERVICE_TOKEN,
@@ -481,24 +624,13 @@ export function createCentralV2DevelopmentRelayPlugin(
 
   return {
     name: 'civil-kiosk-universal-layout-v2-central-development-relay',
+    apply: 'serve',
     configureServer(server) {
+      if (productionRuntime || server.config.mode === 'production') return;
       const mode = !optIn ? 'off' : config.enabled ? 'on' : 'blocked-conflict';
       server.config.logger.info(`[civil-universal-layout-v2] central-relay=${mode}`);
       const forward = createCentralV2PlanForwarder(config, fetch, (diagnostic) => {
-        const counts = `browser-requests=${diagnostic.browserRequests} upstream-requests=${diagnostic.upstreamRequests}`;
-        if (diagnostic.status !== undefined) {
-          server.config.logger.info(
-            `[civil-universal-layout-v2] ${counts} upstream-status=${diagnostic.status}`
-            + ` content-type=${diagnostic.contentType ?? 'missing'}`
-            + (diagnostic.errorCode ? ` error-code=${diagnostic.errorCode}` : ''),
-          );
-          return;
-        }
-        if (diagnostic.errorCode) {
-          server.config.logger.info(`[civil-universal-layout-v2] ${counts} upstream-error=${diagnostic.errorCode}`);
-          return;
-        }
-        server.config.logger.info(`[civil-universal-layout-v2] ${counts}`);
+        server.config.logger.info(formatCentralV2Diagnostic(diagnostic));
       });
       server.middlewares.use(centralV2Middleware(forward));
     },
