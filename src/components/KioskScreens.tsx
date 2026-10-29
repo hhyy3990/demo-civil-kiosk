@@ -42,7 +42,7 @@ export function MainMenuScreen({
   universalMockBackend: 'local' | 'central' | 'openai';
   onUniversalMockApply: (columns: UniversalMockColumns | null) => void;
   showUniversalV2Controls: boolean;
-  universalV2Backend: 'local-fake' | 'central-fake';
+  universalV2Backend: 'local-fake' | 'central-fake' | 'central-openai';
   universalV2OptionId: string | null;
   universalV2Pending: boolean;
   universalV2Message: string;

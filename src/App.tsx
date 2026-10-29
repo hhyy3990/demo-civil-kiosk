@@ -157,8 +157,14 @@ function App() {
   const universalLayoutMode = import.meta.env.DEV
     ? new URLSearchParams(window.location.search).get('universal-layout')
     : null;
-  const showUniversalV2Controls = universalLayoutMode === 'v2' || universalLayoutMode === 'v2-central';
-  const universalV2Backend = universalLayoutMode === 'v2-central' ? 'central-fake' : 'local-fake';
+  const showUniversalV2Controls = universalLayoutMode === 'v2'
+    || universalLayoutMode === 'v2-central'
+    || universalLayoutMode === 'v2-openai';
+  const universalV2Backend = universalLayoutMode === 'v2-central'
+    ? 'central-fake'
+    : universalLayoutMode === 'v2-openai'
+      ? 'central-openai'
+      : 'local-fake';
   const universalLayoutBackend = universalLayoutMode === 'central'
     ? 'central'
     : universalLayoutMode === 'openai'

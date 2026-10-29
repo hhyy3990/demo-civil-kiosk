@@ -27,7 +27,11 @@ type FakeState = {
   message: string;
 };
 
-type Backend = 'local-fake' | 'central-fake';
+type Backend = 'local-fake' | 'central-fake' | 'central-openai';
+
+function isCentralBackend(backend: Backend): boolean {
+  return backend !== 'local-fake';
+}
 
 type ContextSnapshot = {
   key: string;
@@ -279,7 +283,7 @@ function buildRequest(step: KioskStep, profile: AccessibilityProfile, backend: B
       itemHeight: Math.round(geometry.minimumRenderedHeight),
       measurementsValid: geometry.measurementsValid,
     },
-    reason: backend === 'central-fake' ? centralReason : commonSafetyReason,
+    reason: isCentralBackend(backend) ? centralReason : commonSafetyReason,
   };
 }
 
@@ -404,7 +408,9 @@ export function useUniversalLayoutV2Fake({
     try {
       const endpoint = backend === 'central-fake'
         ? '/api/dev/universal-layout/v2-central-plan'
-        : '/api/dev/universal-layout/v2-fake';
+        : backend === 'central-openai'
+          ? '/api/dev/universal-layout/v2-openai-plan'
+          : '/api/dev/universal-layout/v2-fake';
       const response = await fetch(endpoint, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
@@ -427,8 +433,8 @@ export function useUniversalLayoutV2Fake({
         plan: payload.plan,
         contextKey: context.key,
         pending: false,
-        message: backend === 'central-fake'
-          ? '중앙 Development v2 Fake 계획이 현재 모델과 호스트 정책 검증을 통과했습니다.'
+        message: backend === 'central-fake' || backend === 'central-openai'
+          ? `중앙 Development v2 ${backend === 'central-openai' ? 'OpenAI' : 'Fake'} 계획이 현재 모델과 호스트 정책 검증을 통과했습니다.`
           : '로컬 Development 정책으로 reserved-safe-list를 검증했습니다. 중앙 API와 AI는 호출하지 않았습니다.',
       });
     } catch (error) {
@@ -436,7 +442,7 @@ export function useUniversalLayoutV2Fake({
       const latest = readContext(step, profile, backend);
       if (latest.key !== context.key || generation.current !== requestGeneration) return;
       const errorCode = error instanceof Error ? error.message : 'INVALID_V2_PLAN';
-      const message = backend === 'central-fake'
+      const message = isCentralBackend(backend)
         ? errorCode === 'RELAY_DISABLED'
           ? '중앙 v2 Development relay가 OFF입니다. 로컬 Fake 또는 기존 배치를 사용하세요.'
           : '중앙 v2 Development 계획을 받지 못했거나 검증에 실패했습니다. 기존 배치를 유지합니다.'

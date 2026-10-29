@@ -8,7 +8,10 @@ import {
 } from './universal-layout/civil-layout-mock.js';
 import { createCentralDevelopmentRelayPlugin } from './universal-layout/central-development-relay.js';
 import { createCentralOpenAiDevelopmentRelayPlugin } from './universal-layout/central-openai-development-relay.js';
-import { createCentralV2DevelopmentRelayPlugin } from './universal-layout/central-v2-development-relay.js';
+import {
+  createCentralV2DevelopmentRelayPlugin,
+  createCentralV2OpenAiDevelopmentRelayPlugin,
+} from './universal-layout/central-v2-development-relay.js';
 import { civilLayoutV2FakePlugin } from './universal-layout/civil-layout-v2-fake-relay.js';
 
 const replitHosts = [
@@ -178,6 +181,7 @@ export default defineConfig({
     createCentralDevelopmentRelayPlugin(),
     createCentralOpenAiDevelopmentRelayPlugin(),
     createCentralV2DevelopmentRelayPlugin(),
+    createCentralV2OpenAiDevelopmentRelayPlugin(),
   ],
   server: {
     host: '0.0.0.0',

@@ -9,6 +9,7 @@ import {
 } from './civil-layout-v2-fake';
 import {
   createCentralV2DevelopmentRelayPlugin,
+  createCentralV2OpenAiDevelopmentRelayPlugin,
   createCentralV2PlanForwarder,
   formatCentralV2Diagnostic,
 } from './central-v2-development-relay';
@@ -109,6 +110,37 @@ test('v2 central relay posts strict model envelope and validates the top-level p
     diagnostics.map(formatCentralV2Diagnostic).join('\n'),
     /central-civil-kiosk|test-protection-token|test-service-token|certificate-grid/,
   );
+});
+
+test('v2 OpenAI relay reuses model validation and posts to the OpenAI plan endpoint', async () => {
+  let calls = 0;
+  const { model } = createValidatedCivilLayoutV2Fake(request);
+  const forward = createCentralV2PlanForwarder(
+    {
+      ...fakeConfig,
+      centralEndpointPath: '/api/dev/universal-layout/v2/openai-plan',
+    },
+    validFakeFetch((input, init) => {
+      calls += 1;
+      const url = new URL(String(input));
+      assert.equal(url.pathname, '/api/dev/universal-layout/v2/openai-plan');
+      assert.equal(url.searchParams.getAll('project-protection-bypass').length, 1);
+      assert.equal(init?.method, 'POST');
+      const headers = new Headers(init?.headers);
+      assert.equal(headers.get('Authorization'), 'Bearer test-service-token');
+      const body = JSON.parse(String(init?.body));
+      assert.deepEqual(Object.keys(body), ['model']);
+      assert.deepEqual(body.model, model);
+    }),
+    () => jsonResponse(centralPlan),
+  );
+
+  const result = await forward(relayRequest);
+  assert.equal(calls, 1);
+  assert.equal(result.status, 200);
+  assert.deepEqual(result.body, { accepted: true, model, plan: centralPlan });
+  assert.equal((await forward(relayRequest)).status, 200);
+  assert.equal(calls, 1);
 });
 
 test('v2 central relay rejects invalid host context before upstream access', async (t) => {
@@ -429,6 +461,10 @@ test('local Development plugin defaults OFF, conflicts with v1 relays, and is ab
       CIVIL_UNIVERSAL_LAYOUT_V2_CENTRAL_RELAY_ENABLED: 'true',
       CIVIL_UNIVERSAL_LAYOUT_OPENAI_RELAY_ENABLED: 'true',
     }],
+    ['v2 OpenAI conflict', {
+      CIVIL_UNIVERSAL_LAYOUT_V2_CENTRAL_RELAY_ENABLED: 'true',
+      CIVIL_UNIVERSAL_LAYOUT_V2_OPENAI_RELAY_ENABLED: 'true',
+    }],
   ] as const;
 
   for (const [name, env] of cases) {
@@ -507,6 +543,120 @@ test('Production Vite mode suppresses relay diagnostics even when NODE_ENV is de
     middlewares: { use: () => { middlewareInstalled = true; } },
   } as unknown as Parameters<NonNullable<Plugin['configureServer']>>[0]);
 
+  assert.equal(middlewareInstalled, false);
+  assert.deepEqual(logged, []);
+});
+
+test('v2 OpenAI plugin is opt-in, conflicts with other upstream relays, and routes only in Development', async (t) => {
+  const variants = [
+    ['default OFF', {}],
+    ['v1 Mock conflict', {
+      CIVIL_UNIVERSAL_LAYOUT_V2_OPENAI_RELAY_ENABLED: 'true',
+      CIVIL_UNIVERSAL_LAYOUT_CENTRAL_RELAY_ENABLED: 'true',
+    }],
+    ['v1 OpenAI conflict', {
+      CIVIL_UNIVERSAL_LAYOUT_V2_OPENAI_RELAY_ENABLED: 'true',
+      CIVIL_UNIVERSAL_LAYOUT_OPENAI_RELAY_ENABLED: 'true',
+    }],
+    ['v2 Fake conflict', {
+      CIVIL_UNIVERSAL_LAYOUT_V2_OPENAI_RELAY_ENABLED: 'true',
+      CIVIL_UNIVERSAL_LAYOUT_V2_CENTRAL_RELAY_ENABLED: 'true',
+    }],
+  ] as const;
+
+  for (const [name, env] of variants) {
+    await t.test(name, async () => {
+      const plugin = createCentralV2OpenAiDevelopmentRelayPlugin(env as NodeJS.ProcessEnv);
+      assert.equal(plugin.apply, 'serve');
+      assert.equal(plugin.configurePreviewServer, undefined);
+      let middleware: ((request: IncomingMessage, response: ServerResponse, next: (error?: unknown) => void) => void) | undefined;
+      const logged: string[] = [];
+      plugin.configureServer?.({
+        config: { logger: { info: (line: string) => logged.push(line) } },
+        middlewares: { use: (handler: typeof middleware) => { middleware = handler; } },
+      } as unknown as Parameters<NonNullable<Plugin['configureServer']>>[0]);
+      assert.ok(middleware);
+      const requestStream = Object.assign(
+        Readable.from([Buffer.from(JSON.stringify(relayRequest))]),
+        {
+          url: '/api/dev/universal-layout/v2-openai-plan',
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+        },
+      );
+      let status = 0;
+      let bodyText = '';
+      const response = {
+        set statusCode(value: number) { status = value; },
+        setHeader: () => undefined,
+        end: (value: string) => { bodyText = value; },
+      };
+      await middleware(
+        requestStream as IncomingMessage,
+        response as unknown as ServerResponse,
+        () => { throw new Error('OpenAI relay middleware did not match'); },
+      );
+      const payload = JSON.parse(bodyText);
+      if (name === 'default OFF' || name.endsWith('conflict')) {
+        assert.equal(status, 404);
+        assert.equal(payload.error, 'RELAY_DISABLED');
+        assert.match(logged[0] ?? '', /openai-relay=(off|blocked-conflict)/);
+      } else {
+        assert.fail('Unexpected relay test case');
+      }
+    });
+  }
+
+  await t.test('enabled gate exposes only the Development route and fails closed without credentials', async () => {
+    const plugin = createCentralV2OpenAiDevelopmentRelayPlugin({
+      CIVIL_UNIVERSAL_LAYOUT_V2_OPENAI_RELAY_ENABLED: 'true',
+    });
+    let middleware: ((request: IncomingMessage, response: ServerResponse, next: (error?: unknown) => void) => void) | undefined;
+    const logged: string[] = [];
+    plugin.configureServer?.({
+      config: { logger: { info: (line: string) => logged.push(line) } },
+      middlewares: { use: (handler: typeof middleware) => { middleware = handler; } },
+    } as unknown as Parameters<NonNullable<Plugin['configureServer']>>[0]);
+    assert.ok(middleware);
+    assert.match(logged[0] ?? '', /openai-relay=on/);
+    const requestStream = Object.assign(
+      Readable.from([Buffer.from(JSON.stringify(relayRequest))]),
+      {
+        url: '/api/dev/universal-layout/v2-openai-plan',
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+      },
+    );
+    let status = 0;
+    let bodyText = '';
+    const response = {
+      set statusCode(value: number) { status = value; },
+      setHeader: () => undefined,
+      end: (value: string) => { bodyText = value; },
+    };
+    await middleware(
+      requestStream as IncomingMessage,
+      response as unknown as ServerResponse,
+      () => { throw new Error('OpenAI relay middleware did not match'); },
+    );
+    assert.equal(status, 503);
+    assert.equal(JSON.parse(bodyText).error, 'CENTRAL_RELAY_NOT_CONFIGURED');
+  });
+});
+
+test('v2 OpenAI relay is not installed for Production runtime or Vite preview', () => {
+  const plugin = createCentralV2OpenAiDevelopmentRelayPlugin({
+    NODE_ENV: 'production',
+    CIVIL_UNIVERSAL_LAYOUT_V2_OPENAI_RELAY_ENABLED: 'true',
+  });
+  let middlewareInstalled = false;
+  const logged: string[] = [];
+  plugin.configureServer?.({
+    config: { logger: { info: (line: string) => logged.push(line) } },
+    middlewares: { use: () => { middlewareInstalled = true; } },
+  } as unknown as Parameters<NonNullable<Plugin['configureServer']>>[0]);
+  assert.equal(plugin.apply, 'serve');
+  assert.equal(plugin.configurePreviewServer, undefined);
   assert.equal(middlewareInstalled, false);
   assert.deepEqual(logged, []);
 });

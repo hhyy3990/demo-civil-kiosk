@@ -24,6 +24,8 @@ import {
 
 const endpointPath = '/api/dev/universal-layout/v2-central-plan';
 const centralEndpointPath = '/api/dev/universal-layout/v2/fake-plan';
+const openAiEndpointPath = '/api/dev/universal-layout/v2/openai-plan';
+const openAiRelayPath = '/api/dev/universal-layout/v2-openai-plan';
 const maxRequestBytes = 8192;
 const maxResponseBytes = 16_384;
 const requestTimeoutMs = 10_000;
@@ -87,6 +89,7 @@ const centralRelayRequestSchema = z.object({
 
 type CentralRelayConfig = {
   enabled: boolean;
+  centralEndpointPath?: typeof centralEndpointPath | typeof openAiEndpointPath;
   developmentUrl?: string;
   externalAccessToken?: string;
   serviceToken?: string;
@@ -209,11 +212,11 @@ function safeDevelopmentOrigin(value?: string): URL | null {
   }
 }
 
-function buildCentralEndpoint(config: CentralV2RelayConfig): URL | null {
+function buildCentralEndpoint(config: CentralRelayConfig): URL | null {
   if (!config.externalAccessToken) return null;
   const origin = safeDevelopmentOrigin(config.developmentUrl);
   if (!origin) return null;
-  const endpoint = new URL(centralEndpointPath, origin.origin);
+  const endpoint = new URL(config.centralEndpointPath ?? centralEndpointPath, origin.origin);
   endpoint.searchParams.set('project-protection-bypass', config.externalAccessToken);
   return endpoint;
 }
@@ -361,7 +364,7 @@ function mapCentralFailure(status: number): CentralV2RelayResult {
 }
 
 export function createCentralV2PlanForwarder(
-  config: CentralV2RelayConfig,
+  config: CentralRelayConfig,
   fetchImpl: typeof fetch = fetch,
   onDiagnostic?: (diagnostic: CentralV2Diagnostic) => void,
 ) {
@@ -571,13 +574,16 @@ function sameOrigin(request: IncomingMessage): boolean {
   }
 }
 
-function centralV2Middleware(forward: ReturnType<typeof createCentralV2PlanForwarder>) {
+function centralV2Middleware(
+  forward: ReturnType<typeof createCentralV2PlanForwarder>,
+  localEndpointPath = endpointPath,
+) {
   return async (
     request: IncomingMessage,
     response: ServerResponse,
     next: (error?: unknown) => void,
   ) => {
-    if ((request.url ?? '/').split('?')[0] !== endpointPath) return next();
+    if ((request.url ?? '/').split('?')[0] !== localEndpointPath) return next();
     if (request.method !== 'POST') {
       response.setHeader('Allow', 'POST');
       return sendJson(response, 405, { accepted: false, error: 'METHOD_NOT_ALLOWED' });
@@ -607,31 +613,57 @@ function centralV2Middleware(forward: ReturnType<typeof createCentralV2PlanForwa
   };
 }
 
-export function createCentralV2DevelopmentRelayPlugin(
-  env: NodeJS.ProcessEnv = process.env,
+function createCentralV2RelayPlugin(
+  env: NodeJS.ProcessEnv,
+  variant: 'central-fake' | 'central-openai',
 ): Plugin {
   const productionRuntime = env.NODE_ENV === 'production';
   const v1MockEnabled = env.CIVIL_UNIVERSAL_LAYOUT_CENTRAL_RELAY_ENABLED === 'true';
   const v1OpenAiEnabled = env.CIVIL_UNIVERSAL_LAYOUT_OPENAI_RELAY_ENABLED === 'true';
-  const optIn = env.CIVIL_UNIVERSAL_LAYOUT_V2_CENTRAL_RELAY_ENABLED === 'true';
-  const config: CentralV2RelayConfig = {
-    enabled: optIn && !productionRuntime && !v1MockEnabled && !v1OpenAiEnabled,
+  const v2CentralEnabled = env.CIVIL_UNIVERSAL_LAYOUT_V2_CENTRAL_RELAY_ENABLED === 'true';
+  const v2OpenAiEnabled = env.CIVIL_UNIVERSAL_LAYOUT_V2_OPENAI_RELAY_ENABLED === 'true';
+  const optIn = variant === 'central-fake' ? v2CentralEnabled : v2OpenAiEnabled;
+  const hasConflict = v1MockEnabled
+    || v1OpenAiEnabled
+    || (variant === 'central-fake' ? v2OpenAiEnabled : v2CentralEnabled);
+  const config: CentralRelayConfig = {
+    enabled: optIn && !productionRuntime && !hasConflict,
+    centralEndpointPath: variant === 'central-openai' ? openAiEndpointPath : centralEndpointPath,
     developmentUrl: env.CIVIL_UNIVERSAL_LAYOUT_CENTRAL_DEV_URL,
     externalAccessToken: env.CIVIL_UNIVERSAL_LAYOUT_EXTERNAL_ACCESS_TOKEN,
     serviceToken: env.AI_LAYOUT_SERVICE_TOKEN,
   };
 
   return {
-    name: 'civil-kiosk-universal-layout-v2-central-development-relay',
+    name: variant === 'central-openai'
+      ? 'civil-kiosk-universal-layout-v2-openai-development-relay'
+      : 'civil-kiosk-universal-layout-v2-central-development-relay',
     apply: 'serve',
     configureServer(server) {
       if (productionRuntime || server.config.mode === 'production') return;
       const mode = !optIn ? 'off' : config.enabled ? 'on' : 'blocked-conflict';
-      server.config.logger.info(`[civil-universal-layout-v2] central-relay=${mode}`);
+      server.config.logger.info(
+        `[civil-universal-layout-v2] ${variant === 'central-openai' ? 'openai-relay' : 'central-relay'}=${mode}`,
+      );
       const forward = createCentralV2PlanForwarder(config, fetch, (diagnostic) => {
         server.config.logger.info(formatCentralV2Diagnostic(diagnostic));
       });
-      server.middlewares.use(centralV2Middleware(forward));
+      server.middlewares.use(centralV2Middleware(
+        forward,
+        variant === 'central-openai' ? openAiRelayPath : endpointPath,
+      ));
     },
   };
+}
+
+export function createCentralV2DevelopmentRelayPlugin(
+  env: NodeJS.ProcessEnv = process.env,
+): Plugin {
+  return createCentralV2RelayPlugin(env, 'central-fake');
+}
+
+export function createCentralV2OpenAiDevelopmentRelayPlugin(
+  env: NodeJS.ProcessEnv = process.env,
+): Plugin {
+  return createCentralV2RelayPlugin(env, 'central-openai');
 }
