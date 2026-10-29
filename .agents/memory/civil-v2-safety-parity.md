@@ -20,3 +20,9 @@ During Development testing, an expanded Universal v2 control panel can consume s
 **Why:** The panel's expanded height shifted the Civil G menu down by the same amount that distinguished a failing run from the earlier safe measurement.
 
 **How to apply:** Measure and isolate Development test controls before changing business-content spacing; preserve the menu, footer, dock, and post-apply safety check.
+
+Do not run the menu hit-test while the existing QR-success confirmation overlay is still open. Wait for that overlay to close, then use the existing v2 safety path unchanged.
+
+**Why:** The overlay intentionally covers every menu action; the fail-closed hit-test correctly rejected the layout even though the menu, footer, and QR dock geometry was otherwise safe.
+
+**How to apply:** For QR-triggered Development layout requests, defer planning until the host confirmation notice is dismissed. Do not bypass hit-testing or make the overlay click-through.

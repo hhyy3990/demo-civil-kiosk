@@ -25,6 +25,11 @@ import { BottomViewportTestControls } from './components/BottomViewportTestContr
 import { useUniversalLayoutMock } from './useUniversalLayoutMock';
 import { useUniversalLayoutV2Fake } from './useUniversalLayoutV2Fake';
 import { useKioskAccessibility, type KioskStep } from './useKioskAccessibility';
+import { isCivilGQrProfile } from '../universal-layout/civil-qr-auto-v2';
+import {
+  CIVIL_V2_ITEM_IDS,
+  CIVIL_V2_SAFE_LIST_OPTION_ID,
+} from '../universal-layout/civil-layout-v2-fake-constants';
 import '@naebangsik/kiosk-accessibility-sdk/styles.css';
 import './styles.css';
 
@@ -87,8 +92,23 @@ function App() {
   const [qrModalOpen, setQrModalOpen] = useState(false);
   const [accessibilityProfile, setAccessibilityProfile] = useState<AccessibilityProfile>({ ...DEFAULT_ACCESSIBILITY_PROFILE });
   const [accessibilityProfileApplied, setAccessibilityProfileApplied] = useState(false);
+  const [qrAppliedEvent, setQrAppliedEvent] = useState<{
+    id: number;
+    profile: AccessibilityProfile;
+  } | null>(null);
+  const qrAppliedEventCounterRef = useRef(0);
+  const lastAutoQrEventRef = useRef<number | null>(null);
+  const scheduledAutoQrEventRef = useRef<number | null>(null);
   const [devAccessibilityExperienceActive, setDevAccessibilityExperienceActive] = useState(false);
   const [devViewportPercent, setDevViewportPercent] = useState<BottomViewportHeightPercent | null>(null);
+  const autoQrLatestRef = useRef({
+    event: qrAppliedEvent,
+    profile: accessibilityProfile,
+    step,
+    noticeOpen: Boolean(notice),
+  });
+  autoQrLatestRef.current = { event: qrAppliedEvent, profile: accessibilityProfile, step, noticeOpen: Boolean(notice) };
+  const autoQrAnimationFramesRef = useRef<[number, number]>([0, 0]);
   const showViewportTestControls = import.meta.env.DEV
     && new URLSearchParams(window.location.search).get('viewport-test') === '1';
   const showDevAccessibilityExperience = import.meta.env.DEV
@@ -160,11 +180,15 @@ function App() {
   const showUniversalV2Controls = universalLayoutMode === 'v2'
     || universalLayoutMode === 'v2-central'
     || universalLayoutMode === 'v2-openai';
+  const autoQrV2Enabled = import.meta.env.DEV
+    && qrAppliedEvent !== null
+    && isCivilGQrProfile(accessibilityProfile);
   const universalV2Backend = universalLayoutMode === 'v2-central'
     ? 'central-fake'
     : universalLayoutMode === 'v2-openai'
       ? 'central-openai'
       : 'local-fake';
+  const universalV2HookBackend = autoQrV2Enabled ? 'local-fake' : universalV2Backend;
   const universalLayoutBackend = universalLayoutMode === 'central'
     ? 'central'
     : universalLayoutMode === 'openai'
@@ -177,11 +201,15 @@ function App() {
     backend: universalLayoutBackend,
   });
   const universalLayoutV2Fake = useUniversalLayoutV2Fake({
-    enabled: import.meta.env.DEV && showUniversalV2Controls,
+    enabled: import.meta.env.DEV && (showUniversalV2Controls || autoQrV2Enabled),
     step,
     profile: layoutAccessibilityProfile,
-    backend: universalV2Backend,
+    backend: universalV2HookBackend,
   });
+  const autoQrV2ApplyRef = useRef(universalLayoutV2Fake.apply);
+  const autoQrV2CancelRef = useRef(universalLayoutV2Fake.cancel);
+  autoQrV2ApplyRef.current = universalLayoutV2Fake.apply;
+  autoQrV2CancelRef.current = universalLayoutV2Fake.cancel;
   const reset = useCallback(() => {
     try {
       setResidentNumber('');
@@ -193,6 +221,7 @@ function App() {
       setQrModalOpen(false);
       setAccessibilityProfile({ ...DEFAULT_ACCESSIBILITY_PROFILE });
       setAccessibilityProfileApplied(false);
+      setQrAppliedEvent(null);
       setDevAccessibilityExperienceActive(false);
       setDevViewportPercent(null);
       accessibilitySdkRef.current?.endSession();
@@ -241,6 +270,16 @@ function App() {
     setDevViewportPercent(profile.viewportMode?.heightPercent ?? null);
     setNotice(isDevelopmentExperience ? '' : '내 방식 QR의 접근성 설정을 적용했습니다.');
   }, []);
+  const applyQrAccessibilityProfile = useCallback((profile: AccessibilityProfile) => {
+    applyAccessibilityProfile(profile);
+    if (import.meta.env.DEV) {
+      qrAppliedEventCounterRef.current += 1;
+      setQrAppliedEvent({
+        id: qrAppliedEventCounterRef.current,
+        profile,
+      });
+    }
+  }, [applyAccessibilityProfile]);
   const startDevAccessibilityExperience = useCallback(() => {
     const profile = DEV_ACCESSIBILITY_EXPERIENCE_PROFILE;
     if (
@@ -266,6 +305,79 @@ function App() {
     if (!import.meta.env.DEV || accessibilityProfileApplied) return;
     setDevViewportPercent(heightPercent);
   }, [accessibilityProfileApplied]);
+
+  useEffect(() => {
+    if (qrAppliedEvent === null) {
+      if (scheduledAutoQrEventRef.current !== null) {
+        for (const frame of autoQrAnimationFramesRef.current) window.cancelAnimationFrame(frame);
+        scheduledAutoQrEventRef.current = null;
+      }
+      return;
+    }
+    if (lastAutoQrEventRef.current === qrAppliedEvent.id) return;
+    if (scheduledAutoQrEventRef.current !== null) {
+      for (const frame of autoQrAnimationFramesRef.current) window.cancelAnimationFrame(frame);
+      scheduledAutoQrEventRef.current = null;
+    }
+    autoQrV2CancelRef.current();
+    if (accessibilityProfile !== qrAppliedEvent.profile) return;
+    if (notice) return;
+
+    if (
+      !import.meta.env.DEV
+      || !isCivilGQrProfile(accessibilityProfile)
+      || step !== 'main-menu'
+      || window.innerWidth !== 1080
+      || window.innerHeight !== 1920
+    ) {
+      lastAutoQrEventRef.current = qrAppliedEvent.id;
+      return;
+    }
+
+    scheduledAutoQrEventRef.current = qrAppliedEvent.id;
+    autoQrAnimationFramesRef.current[0] = window.requestAnimationFrame(() => {
+      autoQrAnimationFramesRef.current[1] = window.requestAnimationFrame(() => {
+        if (scheduledAutoQrEventRef.current !== qrAppliedEvent.id) return;
+        scheduledAutoQrEventRef.current = null;
+        autoQrAnimationFramesRef.current = [0, 0];
+        const latest = autoQrLatestRef.current;
+        if (latest.event?.id !== qrAppliedEvent.id) return;
+        if (latest.noticeOpen) return;
+        if (
+          latest.profile !== latest.event.profile
+          || !isCivilGQrProfile(latest.profile)
+          || latest.step !== 'main-menu'
+          || window.innerWidth !== 1080
+          || window.innerHeight !== 1920
+        ) {
+          lastAutoQrEventRef.current = qrAppliedEvent.id;
+          return;
+        }
+        const grid = rootRef.current?.querySelector<HTMLElement>('.certificate-grid');
+        const itemIds = grid
+          ? Array.from(
+              grid.querySelectorAll<HTMLElement>('[data-a11y-action-id]'),
+              (item) => item.dataset.a11yActionId ?? '',
+            )
+          : [];
+        if (
+          !grid?.isConnected
+          || itemIds.length !== CIVIL_V2_ITEM_IDS.length
+          || itemIds.some((itemId, index) => itemId !== CIVIL_V2_ITEM_IDS[index])
+        ) {
+          lastAutoQrEventRef.current = qrAppliedEvent.id;
+          return;
+        }
+        lastAutoQrEventRef.current = qrAppliedEvent.id;
+        void autoQrV2ApplyRef.current(CIVIL_V2_SAFE_LIST_OPTION_ID);
+      });
+    });
+  }, [accessibilityProfile, notice, qrAppliedEvent, step]);
+
+  useEffect(() => () => {
+    for (const frame of autoQrAnimationFramesRef.current) window.cancelAnimationFrame(frame);
+    scheduledAutoQrEventRef.current = null;
+  }, []);
 
   return (
     <>
@@ -349,7 +461,7 @@ function App() {
       <QrSetupModal
         active={qrModalOpen}
         onClose={closeQrModal}
-        onApplyProfile={applyAccessibilityProfile}
+        onApplyProfile={applyQrAccessibilityProfile}
         registerSessionCleanup={registerSessionCleanup}
         createSessionGuard={createSessionGuard}
       />

@@ -584,5 +584,6 @@ export function useUniversalLayoutV2Fake({
     pending: state.pending,
     message,
     apply,
+    cancel,
   };
 }
