@@ -31,7 +31,6 @@ const eligibility = {
   screenIsMainMenu: true,
   viewportAllowed: true,
   targetViewport: true,
-  standardProfile: true,
   geometryKnown: true,
   footerVisible: true,
   footerInFlow: true,
@@ -40,7 +39,9 @@ const eligibility = {
   menuClearOfFooter: true,
   menuClearOfQrDock: true,
   minimumTouchTargetPx: 44,
+  menuHitTestSafe: true,
   reservedBottomCapability: true,
+  centralProfileAllowed: true,
 } as const;
 
 const relayRequest = { request, eligibility };
@@ -174,6 +175,10 @@ test('v2 central relay rejects invalid host context before upstream access', asy
       ...relayRequest,
       eligibility: { ...eligibility, minimumTouchTargetPx: 43 },
     }],
+    ['visible menu item fails hit test', {
+      ...relayRequest,
+      eligibility: { ...eligibility, menuHitTestSafe: false },
+    }],
     ['measurement unavailable', {
       ...relayRequest,
       eligibility: { ...eligibility, geometryKnown: false },
@@ -195,6 +200,61 @@ test('v2 central relay rejects invalid host context before upstream access', asy
       const result = await forward(input);
       assert.notEqual(result.status, 200);
       assert.equal(calls, 0);
+    });
+  }
+});
+
+test('v2 central relay accepts only the exact A and G accessibility tuples', async (t) => {
+  const gRequest = {
+    ...request,
+    accessibility: {
+      textScale: 'large',
+      buttonScale: 'large',
+      contrast: 'high',
+      viewportMode: { mode: 'bottom', heightPercent: 70 },
+    },
+  } as const;
+  const cases = [
+    ['A', relayRequest],
+    ['G', { ...relayRequest, request: gRequest }],
+  ] as const;
+
+  for (const [name, input] of cases) {
+    await t.test(name, async () => {
+      const { model, plan } = createValidatedCivilLayoutV2Fake(input.request);
+      let upstreamCalls = 0;
+      const forward = createCentralV2PlanForwarder(
+        fakeConfig,
+        validFakeFetch(() => { upstreamCalls += 1; }, () => jsonResponse(plan)),
+      );
+      const result = await forward(input);
+      assert.equal(result.status, 200);
+      assert.equal(upstreamCalls, 1);
+      assert.deepEqual(result.body, { accepted: true, model, plan });
+    });
+  }
+
+  const deniedProfiles = [
+    { ...request.accessibility, textScale: 'large' },
+    { ...request.accessibility, buttonScale: 'large' },
+    { ...request.accessibility, contrast: 'high' },
+    { ...request.accessibility, viewportMode: { mode: 'bottom', heightPercent: 70 } },
+    { ...gRequest.accessibility, viewportMode: { mode: 'bottom', heightPercent: 60 } },
+    { ...gRequest.accessibility, contrast: 'standard' },
+  ];
+  for (const [index, accessibility] of deniedProfiles.entries()) {
+    await t.test(`mixed tuple ${index + 1}`, async () => {
+      let upstreamCalls = 0;
+      const forward = createCentralV2PlanForwarder(
+        fakeConfig,
+        validFakeFetch(() => { upstreamCalls += 1; }),
+      );
+      const result = await forward({
+        ...relayRequest,
+        request: { ...request, accessibility },
+      });
+      assert.equal(result.status, 409);
+      assert.equal(upstreamCalls, 0);
     });
   }
 });

@@ -91,6 +91,25 @@ test('Civil Development v2 policy filters large text, large buttons, contrast, a
   }
 });
 
+test('Civil Development v2 G tuple matches the registered hashes and reserved-safe-list policy', () => {
+  const { model, plan } = createValidatedCivilLayoutV2Fake({
+    ...regularDefaultRequest,
+    accessibility: {
+      textScale: 'large',
+      buttonScale: 'large',
+      contrast: 'high',
+      viewportMode: { mode: 'bottom', heightPercent: 70 },
+    },
+  });
+  assert.equal(model.structureHash, '5ee50fd98eb1ba357232fbc21a39c78b1721925491635b9943a7027cab4eed0b');
+  assert.equal(model.constraintHash, '67db940ccb6a69a59f0d13cc902dfa610d4e24a929021efbc2270b7e5033d3e9');
+  assert.deepEqual(model.components[0]?.allowedColumns, [1]);
+  assert.equal(plan.operations[0]?.type, 'selectLayoutOption');
+  if (plan.operations[0]?.type === 'selectLayoutOption') {
+    assert.equal(plan.operations[0].optionId, CIVIL_V2_SAFE_LIST_OPTION_ID);
+  }
+});
+
 test('Civil Development v2 context/generation guard drops stale plans', () => {
   assert.equal(isCurrentCivilV2FakeRequest('current', 'current', 7, 7), true);
   assert.equal(isCurrentCivilV2FakeRequest('new-profile', 'current', 7, 7), false);

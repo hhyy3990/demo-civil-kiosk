@@ -30,9 +30,10 @@ const eligibility = {
   menuClearOfFooter: true,
   menuClearOfQrDock: true,
   minimumTouchTargetPx: 44,
+  menuHitTestSafe: true,
   reservedBottomCapability: true,
   targetViewport: false,
-  standardProfile: true,
+  centralProfileAllowed: true,
 };
 
 function getMiddleware() {

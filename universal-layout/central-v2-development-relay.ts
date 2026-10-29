@@ -20,6 +20,7 @@ import {
 import {
   civilV2CentralEligibilitySchema,
   getCivilV2HostSafetyFailure,
+  isCivilV2CentralAccessibilityAllowed,
 } from './civil-layout-v2-host-safety.js';
 
 const endpointPath = '/api/dev/universal-layout/v2-central-plan';
@@ -322,10 +323,7 @@ function createModelFromRelayRequest(input: unknown):
     || viewport.width !== 1080
     || viewport.height !== 1920
     || request.screenId !== CIVIL_V2_SCREEN_ID
-    || accessibility.textScale !== 'standard'
-    || accessibility.buttonScale !== 'standard'
-    || accessibility.contrast !== 'standard'
-    || accessibility.viewportMode !== null
+    || !isCivilV2CentralAccessibilityAllowed(accessibility)
     || !Array.isArray(layoutCapabilities)
     || !layoutCapabilities.includes('reserved-bottom-controls')
   ) {

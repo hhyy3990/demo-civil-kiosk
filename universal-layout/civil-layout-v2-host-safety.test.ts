@@ -29,9 +29,10 @@ const eligibility = {
   menuClearOfFooter: true,
   menuClearOfQrDock: true,
   minimumTouchTargetPx: 44,
+  menuHitTestSafe: true,
   reservedBottomCapability: true,
   targetViewport: true,
-  standardProfile: true,
+  centralProfileAllowed: true,
 };
 
 test('shared Civil v2 host safety accepts only a fully measured safe 18-item menu', async (t) => {
@@ -50,6 +51,7 @@ test('shared Civil v2 host safety accepts only a fully measured safe 18-item men
     ['footer overlap', request, { ...eligibility, menuClearOfFooter: false }, 'MENU_CONTROLS_OVERLAP'],
     ['QR dock overlap', request, { ...eligibility, menuClearOfQrDock: false }, 'MENU_CONTROLS_OVERLAP'],
     ['touch target too small', request, { ...eligibility, minimumTouchTargetPx: 43 }, 'TOUCH_TARGET_TOO_SMALL'],
+    ['visible menu item fails hit test', request, { ...eligibility, menuHitTestSafe: false }, 'MENU_HIT_TEST_FAILED'],
     ['capability absent', { ...request, layoutCapabilities: [] }, { ...eligibility, reservedBottomCapability: false }, 'RESERVED_BOTTOM_CONTROLS_UNAVAILABLE'],
     ['capability claim mismatches DOM', request, { ...eligibility, reservedBottomCapability: false }, 'RESERVED_BOTTOM_CONTROLS_UNAVAILABLE'],
     ['unknown measurement shape', request, { ...eligibility, unexpected: true }, 'HOST_SAFETY_MEASUREMENT_INVALID'],

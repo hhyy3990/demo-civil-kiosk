@@ -15,17 +15,40 @@ export const civilV2HostEligibilitySchema = z.object({
   menuClearOfFooter: z.boolean(),
   menuClearOfQrDock: z.boolean(),
   minimumTouchTargetPx: z.number().finite().nonnegative(),
+  menuHitTestSafe: z.boolean(),
   reservedBottomCapability: z.boolean(),
   targetViewport: z.boolean(),
-  standardProfile: z.boolean(),
+  centralProfileAllowed: z.boolean(),
 }).strict();
 
 export const civilV2CentralEligibilitySchema = civilV2HostEligibilitySchema.extend({
   targetViewport: z.literal(true),
-  standardProfile: z.literal(true),
+  centralProfileAllowed: z.literal(true),
 }).strict();
 
 export type CivilV2HostEligibility = z.infer<typeof civilV2HostEligibilitySchema>;
+
+const centralAccessibilityProfileSchema = z.union([
+  z.object({
+    textScale: z.literal('standard'),
+    buttonScale: z.literal('standard'),
+    contrast: z.literal('standard'),
+    viewportMode: z.null(),
+  }).strict(),
+  z.object({
+    textScale: z.literal('large'),
+    buttonScale: z.literal('large'),
+    contrast: z.literal('high'),
+    viewportMode: z.object({
+      mode: z.literal('bottom'),
+      heightPercent: z.literal(70),
+    }).strict(),
+  }).strict(),
+]);
+
+export function isCivilV2CentralAccessibilityAllowed(value: unknown): boolean {
+  return centralAccessibilityProfileSchema.safeParse(value).success;
+}
 
 export type CivilV2HostSafetyFailure =
   | 'SCREEN_NOT_MAIN_MENU'
@@ -36,6 +59,7 @@ export type CivilV2HostSafetyFailure =
   | 'QR_DOCK_NOT_SAFE'
   | 'MENU_CONTROLS_OVERLAP'
   | 'TOUCH_TARGET_TOO_SMALL'
+  | 'MENU_HIT_TEST_FAILED'
   | 'RESERVED_BOTTOM_CONTROLS_UNAVAILABLE'
   | 'HOST_SAFETY_MEASUREMENT_INVALID';
 
@@ -84,6 +108,7 @@ export function getCivilV2HostSafetyFailure(
     return 'MENU_CONTROLS_OVERLAP';
   }
   if (eligibility.minimumTouchTargetPx < 44) return 'TOUCH_TARGET_TOO_SMALL';
+  if (!eligibility.menuHitTestSafe) return 'MENU_HIT_TEST_FAILED';
 
   const capabilityIsSupported = eligibility.footerVisible
     && eligibility.footerInFlow
@@ -122,6 +147,8 @@ export function civilV2HostSafetyMessage(failure: CivilV2HostSafetyFailure): str
       return '증명서 메뉴와 하단 조작 영역이 겹쳐 기본 배치를 유지합니다.';
     case 'TOUCH_TARGET_TOO_SMALL':
       return '실제 메뉴 터치 영역이 44px보다 작아 기본 배치를 유지합니다.';
+    case 'MENU_HIT_TEST_FAILED':
+      return '화면에 보이는 증명서 버튼을 직접 누를 수 없어 기본 배치를 유지합니다.';
     case 'RESERVED_BOTTOM_CONTROLS_UNAVAILABLE':
       return 'reserved-bottom-controls 영역을 확인할 수 없어 기본 배치를 유지합니다.';
   }

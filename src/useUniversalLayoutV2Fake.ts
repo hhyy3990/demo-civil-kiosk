@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
-  DEFAULT_ACCESSIBILITY_PROFILE,
   type AccessibilityProfile,
 } from '@naebangsik/kiosk-accessibility-sdk';
 import {
@@ -15,6 +14,7 @@ import {
 import {
   civilV2HostSafetyMessage,
   getCivilV2HostSafetyFailure,
+  isCivilV2CentralAccessibilityAllowed,
   type CivilV2HostEligibility,
 } from '../universal-layout/civil-layout-v2-host-safety';
 import type { UniversalLayoutV2Plan } from '../universal-layout/v2/universal-v2-contract-export';
@@ -75,6 +75,7 @@ type GeometrySnapshot = {
   dockVisible: boolean;
   dockReservesBottom: boolean;
   allIdsMatch: boolean;
+  menuHitTestSafe: boolean;
   minimumRenderedHeight: number;
   overlapWithFooter: boolean;
   overlapWithDock: boolean;
@@ -105,6 +106,7 @@ function unavailableGeometry(): GeometrySnapshot {
     dockVisible: false,
     dockReservesBottom: false,
     allIdsMatch: false,
+    menuHitTestSafe: false,
     minimumRenderedHeight: 0,
     overlapWithFooter: false,
     overlapWithDock: false,
@@ -113,6 +115,8 @@ function unavailableGeometry(): GeometrySnapshot {
 
 function readGeometry(): GeometrySnapshot {
   try {
+    const stage = document.querySelector<HTMLElement>('.stage');
+    const stageRect = stage?.getBoundingClientRect() ?? null;
     const grid = document.querySelector<HTMLElement>('.certificate-grid');
     const footer = document.querySelector<HTMLElement>('.device-footer[data-a11y-slot="bottom-controls"]');
     const dock = document.querySelector<HTMLElement>('.a11y-qr-entry-dock');
@@ -161,8 +165,37 @@ function readGeometry(): GeometrySnapshot {
     const allIdsMatch = actions.length === CIVIL_V2_ITEM_IDS.length
       && actions.every((action, index) => action.dataset.a11yActionId === CIVIL_V2_ITEM_IDS[index]);
     const actionRects = actions.map((action) => action.getBoundingClientRect());
+    let visibleActionCount = 0;
+    let menuHitTestSafe = Boolean(stage && hasUsableRect(stageRect) && actions.length > 0);
+    if (stage && hasUsableRect(stageRect)) {
+      for (const [index, actionRect] of actionRects.entries()) {
+        if (!hasUsableRect(actionRect)) {
+          menuHitTestSafe = false;
+          continue;
+        }
+        const centerX = actionRect.left + actionRect.width / 2;
+        const centerY = actionRect.top + actionRect.height / 2;
+        const insideStage = centerX >= stageRect.left + stage.clientLeft
+          && centerX <= stageRect.left + stage.clientLeft + stage.clientWidth
+          && centerY >= stageRect.top + stage.clientTop
+          && centerY <= stageRect.top + stage.clientTop + stage.clientHeight
+          && centerX >= 0
+          && centerX <= window.innerWidth
+          && centerY >= 0
+          && centerY <= window.innerHeight;
+        if (!insideStage) continue;
+        visibleActionCount += 1;
+        const hit = document.elementFromPoint(centerX, centerY);
+        if (!hit || (hit !== actions[index] && !actions[index]?.contains(hit))) {
+          menuHitTestSafe = false;
+        }
+      }
+    }
+    menuHitTestSafe = menuHitTestSafe && visibleActionCount > 0;
     const measurementsValid = Boolean(
-      grid?.isConnected
+      stage?.isConnected
+      && hasUsableRect(stageRect)
+      && grid?.isConnected
       && footer?.isConnected
       && dock?.isConnected
       && hasUsableRect(gridRect)
@@ -200,6 +233,7 @@ function readGeometry(): GeometrySnapshot {
       dockVisible,
       dockReservesBottom,
       allIdsMatch,
+      menuHitTestSafe,
       minimumRenderedHeight,
       overlapWithFooter,
       overlapWithDock,
@@ -250,7 +284,8 @@ function buildRequest(step: KioskStep, profile: AccessibilityProfile, backend: B
     minimumTouchTargetPx: geometry.minimumRenderedHeight,
     reservedBottomCapability,
     targetViewport: window.innerWidth === 1080 && window.innerHeight === 1920,
-    standardProfile: stableJson(profile) === stableJson(DEFAULT_ACCESSIBILITY_PROFILE),
+    centralProfileAllowed: isCivilV2CentralAccessibilityAllowed(accessibility),
+    menuHitTestSafe: geometry.menuHitTestSafe,
   };
   const commonSafetyFailure = getCivilV2HostSafetyFailure(request, eligibility);
   const commonSafetyReason = commonSafetyFailure
@@ -258,8 +293,8 @@ function buildRequest(step: KioskStep, profile: AccessibilityProfile, backend: B
     : null;
   const centralReason = !eligibility.targetViewport
     ? '중앙 v2 시험은 1080×1920 화면에서만 허용됩니다.'
-    : !eligibility.standardProfile
-      ? '중앙 v2 시험은 기본 접근성 프로필에서만 허용됩니다.'
+    : !eligibility.centralProfileAllowed
+      ? '중앙 v2 시험은 기본 A 또는 승인된 G 접근성 조합에서만 허용됩니다.'
       : commonSafetyReason;
   return {
     request: { request, eligibility },
@@ -330,9 +365,7 @@ function readContext(step: KioskStep, profile: AccessibilityProfile, backend: Ba
       backend,
       step,
       profile,
-      request: built.request,
-      eligibility: built.eligibility,
-      geometry: built.geometry,
+      request: (built.request as { request: unknown }).request,
     }),
     request: built.request,
     reason: built.reason,
@@ -427,7 +460,16 @@ export function useUniversalLayoutV2Fake({
         throw new Error(errorCode);
       }
       const latest = readContext(step, profile, backend);
-      if (latest.key !== context.key || generation.current !== requestGeneration) return;
+      if (latest.key !== context.key || generation.current !== requestGeneration) {
+        if (generation.current === requestGeneration) {
+          setState({
+            ...emptyState,
+            contextKey: latest.key,
+            message: '화면 구조가 바뀌어 오래된 계획을 폐기했습니다. 다시 확인해 주세요.',
+          });
+        }
+        return;
+      }
 
       setState({
         plan: payload.plan,
@@ -487,6 +529,55 @@ export function useUniversalLayoutV2Fake({
   const message = state.contextKey === null || state.contextKey === currentContext.key
     ? state.message
     : '';
+
+  useEffect(() => {
+    if (!state.plan) return;
+    const appliedPlan = state.plan;
+    const appliedGeneration = generation.current;
+    if (state.contextKey !== currentContext.key) {
+      const latest = readContext(step, profile, backend);
+      setState((current) => current.plan === appliedPlan
+        ? {
+            ...emptyState,
+            contextKey: latest.key,
+            message: '화면 조건이 바뀌어 오래된 계획을 폐기했습니다. 접근성 설정은 유지됩니다.',
+          }
+        : current);
+      return;
+    }
+
+    let firstFrame = 0;
+    let secondFrame = 0;
+    firstFrame = window.requestAnimationFrame(() => {
+      secondFrame = window.requestAnimationFrame(() => {
+        if (generation.current !== appliedGeneration) return;
+        const latest = readContext(step, profile, backend);
+        if (latest.key !== state.contextKey) {
+          setState((current) => current.plan === appliedPlan
+            ? {
+                ...emptyState,
+                contextKey: latest.key,
+                message: '화면 구조가 바뀌어 계획을 폐기했습니다. 접근성 설정은 유지됩니다.',
+              }
+            : current);
+          return;
+        }
+        if (latest.reason) {
+          setState((current) => current.plan === appliedPlan
+            ? {
+                ...emptyState,
+                contextKey: latest.key,
+                message: `적용 후 화면 안전 검사를 통과하지 못해 배치 계획만 해제했습니다. 접근성 설정은 유지됩니다. ${latest.reason}`,
+              }
+            : current);
+        }
+      });
+    });
+    return () => {
+      window.cancelAnimationFrame(firstFrame);
+      window.cancelAnimationFrame(secondFrame);
+    };
+  }, [backend, currentContext.key, profile, state.contextKey, state.plan, step]);
 
   return {
     activeOptionId,
