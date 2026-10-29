@@ -14,3 +14,9 @@ Treat a valid plan and matching hashes as necessary, not sufficient: after React
 **Why:** A real 1080×1920 Civil G-profile browser run produced a valid one-column plan, but the rendered menu intersected the fixed QR dock and the last item was not hit-testable.
 
 **How to apply:** Keep this post-apply physical check in both local Fake and central-plan application paths; do not widen profile eligibility based on contract validation alone.
+
+During Development testing, an expanded Universal v2 control panel can consume space in the main-menu flow and create apparent menu/dock overlap even when the customer-facing layout is safe.
+
+**Why:** The panel's expanded height shifted the Civil G menu down by the same amount that distinguished a failing run from the earlier safe measurement.
+
+**How to apply:** Measure and isolate Development test controls before changing business-content spacing; preserve the menu, footer, dock, and post-apply safety check.

@@ -46,4 +46,15 @@
   .stage.a11y-qr-entry-dock-home.a11y-qr-entry-dock-scroll-area.a11y-qr-entry-dock-bottom.a11y-text-large.a11y-controls-large.a11y-high-contrast.a11y-easy-language:has(.certificate-grid[data-universal-layout-option="reserved-safe-list"]) .device-footer {
     margin-top: 107px;
   }
+
+  .stage.a11y-qr-entry-dock-home.a11y-qr-entry-dock-scroll-area.a11y-qr-entry-dock-bottom.a11y-text-large.a11y-controls-large.a11y-high-contrast.a11y-easy-language:has(.certificate-grid[data-universal-layout-option="reserved-safe-list"]) .universal-layout-v2-fake[open] {
+    position: fixed;
+    top: 12px;
+    left: 12px;
+    width: 240px;
+    max-width: calc(50vw - 18px);
+    max-height: calc(100vh - 24px);
+    overflow: auto;
+    z-index: 4;
+  }
 }

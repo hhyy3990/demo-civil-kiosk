@@ -5,4 +5,4 @@
 - [Shared guide panel scrolling](shared-guide-panel-scrolling.md) — in v0.5.14, an expanded guidance overlay captures gestures started inside it; collapse it or scroll outside, and avoid host CSS workarounds.
 - [Guide overlay reflow and clipping](easy-guide-mode-reflow.md) — easy-guide counters can shift across titles, and expanded Smart Guide text can overflow at 320×844/80%.
 - [Universal v2 validation boundary](universal-v2-validation-boundary.md) — keep canonical v2 hashing and plan validation in the Development server; the browser must not bundle `node:crypto`.
-- [Civil v2 safety parity](civil-v2-safety-parity.md) — share host checks; a valid G plan can still fail post-apply DOM checks at the fixed QR dock.
+- [Civil v2 safety parity](civil-v2-safety-parity.md) — share host checks and separate expanded Development controls from real menu/dock geometry.
