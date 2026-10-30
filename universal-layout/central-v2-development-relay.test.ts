@@ -12,6 +12,7 @@ import {
   createCentralV2OpenAiDevelopmentRelayPlugin,
   createCentralV2PlanForwarder,
   formatCentralV2Diagnostic,
+  getCivilV2QrAutoMode,
 } from './central-v2-development-relay';
 
 const request = {
@@ -52,6 +53,32 @@ const fakeConfig = {
   externalAccessToken: 'test-protection-token',
   serviceToken: 'test-service-token',
 };
+
+test('Civil QR auto mode defaults OFF and selects only one explicitly enabled Development backend', () => {
+  assert.equal(getCivilV2QrAutoMode({ NODE_ENV: 'development' }), 'off');
+  assert.equal(getCivilV2QrAutoMode({
+    NODE_ENV: 'development',
+    CIVIL_UNIVERSAL_LAYOUT_V2_LOCAL_FAKE_AUTO_ENABLED: 'true',
+  }), 'local-fake');
+  assert.equal(getCivilV2QrAutoMode({
+    NODE_ENV: 'development',
+    CIVIL_UNIVERSAL_LAYOUT_V2_OPENAI_RELAY_ENABLED: 'true',
+  }), 'central-openai');
+  assert.equal(getCivilV2QrAutoMode({
+    NODE_ENV: 'development',
+    CIVIL_UNIVERSAL_LAYOUT_V2_LOCAL_FAKE_AUTO_ENABLED: 'true',
+    CIVIL_UNIVERSAL_LAYOUT_V2_OPENAI_RELAY_ENABLED: 'true',
+  }), 'off');
+  assert.equal(getCivilV2QrAutoMode({
+    NODE_ENV: 'development',
+    CIVIL_UNIVERSAL_LAYOUT_V2_LOCAL_FAKE_AUTO_ENABLED: 'true',
+    CIVIL_UNIVERSAL_LAYOUT_V2_CENTRAL_RELAY_ENABLED: 'true',
+  }), 'off');
+  assert.equal(getCivilV2QrAutoMode({
+    NODE_ENV: 'production',
+    CIVIL_UNIVERSAL_LAYOUT_V2_OPENAI_RELAY_ENABLED: 'true',
+  }), 'off');
+});
 
 function jsonResponse(value: unknown, status = 200): Response {
   return new Response(JSON.stringify(value), {
@@ -621,6 +648,10 @@ test('v2 OpenAI plugin is opt-in, conflicts with other upstream relays, and rout
     ['v2 Fake conflict', {
       CIVIL_UNIVERSAL_LAYOUT_V2_OPENAI_RELAY_ENABLED: 'true',
       CIVIL_UNIVERSAL_LAYOUT_V2_CENTRAL_RELAY_ENABLED: 'true',
+    }],
+    ['local Fake auto conflict', {
+      CIVIL_UNIVERSAL_LAYOUT_V2_OPENAI_RELAY_ENABLED: 'true',
+      CIVIL_UNIVERSAL_LAYOUT_V2_LOCAL_FAKE_AUTO_ENABLED: 'true',
     }],
   ] as const;
 

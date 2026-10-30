@@ -9,6 +9,7 @@ import {
 import { createCentralDevelopmentRelayPlugin } from './universal-layout/central-development-relay.js';
 import { createCentralOpenAiDevelopmentRelayPlugin } from './universal-layout/central-openai-development-relay.js';
 import {
+  getCivilV2QrAutoMode,
   createCentralV2DevelopmentRelayPlugin,
   createCentralV2OpenAiDevelopmentRelayPlugin,
 } from './universal-layout/central-v2-development-relay.js';
@@ -116,7 +117,10 @@ const universalLayoutMockPlugin: Plugin = {
   },
 };
 
-export default defineConfig({
+export default defineConfig(({ mode }) => ({
+  define: {
+    __CIVIL_QR_AUTO_LAYOUT_V2_MODE__: JSON.stringify(getCivilV2QrAutoMode(process.env, mode)),
+  },
   plugins: [
     react(),
     qrProfileRelayPlugin,
@@ -133,4 +137,4 @@ export default defineConfig({
     strictPort: true,
     allowedHosts: [...new Set(replitHosts)],
   },
-});
+}));

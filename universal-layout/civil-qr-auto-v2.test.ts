@@ -4,7 +4,10 @@ import {
   DEFAULT_ACCESSIBILITY_PROFILE,
   type AccessibilityProfile,
 } from '@naebangsik/kiosk-accessibility-sdk';
-import { isCivilGQrProfile } from './civil-qr-auto-v2.js';
+import {
+  isCivilGQrProfile,
+  selectCivilQrAutoV2Backend,
+} from './civil-qr-auto-v2.js';
 
 const civilGProfile: AccessibilityProfile = {
   ...DEFAULT_ACCESSIBILITY_PROFILE,
@@ -29,4 +32,12 @@ test('only the approved Civil G accessibility combination enables automatic v2',
   assert.equal(isCivilGQrProfile({ ...civilGProfile, voiceGuidance: true }), false);
   assert.equal(isCivilGQrProfile({ ...civilGProfile, scrollGuidance: false }), false);
   assert.equal(isCivilGQrProfile({ ...civilGProfile, easyLanguage: false }), false);
+});
+
+test('automatic QR mode selects exactly one development backend and respects the OpenAI gate', () => {
+  assert.equal(selectCivilQrAutoV2Backend(civilGProfile, true, 'local-fake'), 'local-fake');
+  assert.equal(selectCivilQrAutoV2Backend(civilGProfile, true, 'central-openai'), 'central-openai');
+  assert.equal(selectCivilQrAutoV2Backend(civilGProfile, true, 'off'), null);
+  assert.equal(selectCivilQrAutoV2Backend(civilGProfile, false, 'central-openai'), null);
+  assert.equal(selectCivilQrAutoV2Backend(DEFAULT_ACCESSIBILITY_PROFILE, true, 'central-openai'), null);
 });

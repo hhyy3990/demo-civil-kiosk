@@ -6,3 +6,4 @@
 - [Guide overlay reflow and clipping](easy-guide-mode-reflow.md) — easy-guide counters can shift across titles, and expanded Smart Guide text can overflow at 320×844/80%.
 - [Universal v2 validation boundary](universal-v2-validation-boundary.md) — keep canonical v2 hashing and plan validation in the Development server; the browser must not bundle `node:crypto`.
 - [Civil v2 safety parity](civil-v2-safety-parity.md) — share host checks; defer DOM hit-testing until QR success overlays no longer cover the menu.
+- [Temporary Replit test ports](temporary-replit-test-ports.md) — isolated Vite ports can persist in `.replit`; check for test-only port mappings after cleanup.

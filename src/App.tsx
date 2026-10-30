@@ -25,7 +25,7 @@ import { BottomViewportTestControls } from './components/BottomViewportTestContr
 import { useUniversalLayoutMock } from './useUniversalLayoutMock';
 import { useUniversalLayoutV2Fake } from './useUniversalLayoutV2Fake';
 import { useKioskAccessibility, type KioskStep } from './useKioskAccessibility';
-import { isCivilGQrProfile } from '../universal-layout/civil-qr-auto-v2';
+import { isCivilGQrProfile, selectCivilQrAutoV2Backend } from '../universal-layout/civil-qr-auto-v2';
 import {
   CIVIL_V2_ITEM_IDS,
   CIVIL_V2_SAFE_LIST_OPTION_ID,
@@ -180,15 +180,20 @@ function App() {
   const showUniversalV2Controls = universalLayoutMode === 'v2'
     || universalLayoutMode === 'v2-central'
     || universalLayoutMode === 'v2-openai';
-  const autoQrV2Enabled = import.meta.env.DEV
-    && qrAppliedEvent !== null
-    && isCivilGQrProfile(accessibilityProfile);
+  const autoQrV2Backend = qrAppliedEvent === null
+    ? null
+    : selectCivilQrAutoV2Backend(
+        accessibilityProfile,
+        import.meta.env.DEV,
+        __CIVIL_QR_AUTO_LAYOUT_V2_MODE__,
+      );
+  const autoQrV2Enabled = autoQrV2Backend !== null;
   const universalV2Backend = universalLayoutMode === 'v2-central'
     ? 'central-fake'
     : universalLayoutMode === 'v2-openai'
       ? 'central-openai'
       : 'local-fake';
-  const universalV2HookBackend = autoQrV2Enabled ? 'local-fake' : universalV2Backend;
+  const universalV2HookBackend = autoQrV2Backend ?? universalV2Backend;
   const universalLayoutBackend = universalLayoutMode === 'central'
     ? 'central'
     : universalLayoutMode === 'openai'
@@ -417,7 +422,7 @@ function App() {
                 universalMockBackend={universalLayoutBackend}
                 onUniversalMockApply={universalLayoutMock.apply}
                 showUniversalV2Controls={showUniversalV2Controls}
-                universalV2Backend={universalV2Backend}
+                universalV2Backend={universalV2HookBackend}
                 universalV2OptionId={universalLayoutV2Fake.activeOptionId}
                 universalV2Pending={universalLayoutV2Fake.pending}
                 universalV2Message={universalLayoutV2Fake.message}

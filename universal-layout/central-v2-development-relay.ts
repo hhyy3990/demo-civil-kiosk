@@ -32,6 +32,25 @@ const maxResponseBytes = 16_384;
 const requestTimeoutMs = 10_000;
 const successCacheMs = 15_000;
 
+export type CivilV2QrAutoMode = 'local-fake' | 'central-openai' | 'off';
+
+export function getCivilV2QrAutoMode(
+  env: NodeJS.ProcessEnv = process.env,
+  viteMode = 'development',
+): CivilV2QrAutoMode {
+  if (viteMode === 'production' || env.NODE_ENV === 'production') return 'off';
+
+  const otherRelayEnabled = env.CIVIL_UNIVERSAL_LAYOUT_CENTRAL_RELAY_ENABLED === 'true'
+    || env.CIVIL_UNIVERSAL_LAYOUT_OPENAI_RELAY_ENABLED === 'true'
+    || env.CIVIL_UNIVERSAL_LAYOUT_V2_CENTRAL_RELAY_ENABLED === 'true';
+  if (otherRelayEnabled) return 'off';
+
+  const localFakeAutoEnabled = env.CIVIL_UNIVERSAL_LAYOUT_V2_LOCAL_FAKE_AUTO_ENABLED === 'true';
+  const openAiAutoEnabled = env.CIVIL_UNIVERSAL_LAYOUT_V2_OPENAI_RELAY_ENABLED === 'true';
+  if (localFakeAutoEnabled === openAiAutoEnabled) return 'off';
+  return openAiAutoEnabled ? 'central-openai' : 'local-fake';
+}
+
 const safeCentralErrorCodes = new Set([
   'INVALID_MODEL',
   'UNSUPPORTED_HOST_SCREEN',
@@ -625,7 +644,9 @@ function createCentralV2RelayPlugin(
     || v1OpenAiEnabled
     || (variant === 'central-fake' ? v2OpenAiEnabled : v2CentralEnabled);
   const config: CentralRelayConfig = {
-    enabled: optIn && !productionRuntime && !hasConflict,
+    enabled: variant === 'central-openai'
+      ? getCivilV2QrAutoMode(env) === 'central-openai'
+      : optIn && !productionRuntime && !hasConflict,
     centralEndpointPath: variant === 'central-openai' ? openAiEndpointPath : centralEndpointPath,
     developmentUrl: env.CIVIL_UNIVERSAL_LAYOUT_CENTRAL_DEV_URL,
     externalAccessToken: env.CIVIL_UNIVERSAL_LAYOUT_EXTERNAL_ACCESS_TOKEN,
