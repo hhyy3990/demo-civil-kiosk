@@ -41,6 +41,27 @@ type ContextSnapshot = {
   request: unknown;
   reason: string | null;
   failureClass: ClientDiagnosticFailureClass | null;
+  overlapDiagnostic: ClientOverlapDiagnostic;
+};
+
+type DiagnosticRect = {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+} | null;
+
+type ClientOverlapDiagnostic = {
+  menuClearOfFooter: boolean;
+  menuClearOfQrDock: boolean;
+  menuRect: DiagnosticRect;
+  footerRect: DiagnosticRect;
+  qrDockRect: DiagnosticRect;
+  footerOverlapAreaPx2: number;
+  qrDockOverlapAreaPx2: number;
+  viewport: { width: number; height: number };
+  stageScrollTop: number | null;
+  gridColumns: number | null;
 };
 
 type ClientDiagnosticStage =
@@ -148,6 +169,8 @@ function logClientDiagnostic({
   startedAt,
   safetyResult,
   failureClass = null,
+  overlapDiagnostic,
+  rollback,
 }: {
   stage: ClientDiagnosticStage;
   requestId: number;
@@ -155,6 +178,8 @@ function logClientDiagnostic({
   startedAt: number;
   safetyResult: DiagnosticSafetyResult;
   failureClass?: ClientDiagnosticFailureClass | null;
+  overlapDiagnostic?: ClientOverlapDiagnostic;
+  rollback?: boolean;
 }): void {
   if (!import.meta.env.DEV) return;
   const safeOptionId = optionId === CIVIL_V2_SAFE_LIST_OPTION_ID ? optionId : null;
@@ -165,10 +190,12 @@ function logClientDiagnostic({
     stage,
     requestId,
     optionId: safeOptionId,
-    gridColumns: getGridColumnCount(),
+    gridColumns: overlapDiagnostic?.gridColumns ?? getGridColumnCount(),
     safetyResult,
     failureClass: safeFailureClass,
     elapsedMs: Math.max(0, Math.round(performance.now() - startedAt)),
+    ...(overlapDiagnostic ? { overlapDiagnostic } : {}),
+    ...(rollback !== undefined ? { rollback } : {}),
   }));
 }
 
@@ -210,6 +237,12 @@ type GeometrySnapshot = {
   minimumRenderedHeight: number;
   overlapWithFooter: boolean;
   overlapWithDock: boolean;
+  footerOverlapAreaPx2: number;
+  dockOverlapAreaPx2: number;
+  viewportWidth: number;
+  viewportHeight: number;
+  stageScrollTop: number | null;
+  gridColumns: number | null;
 };
 
 function hasUsableRect(rect: DOMRect | null | undefined): rect is DOMRect {
@@ -219,6 +252,29 @@ function hasUsableRect(rect: DOMRect | null | undefined): rect is DOMRect {
     && rect.width > 0
     && rect.height > 0,
   );
+}
+
+function toDiagnosticRect(rect: DOMRect | null): DiagnosticRect {
+  if (
+    !rect
+    || ![rect.x, rect.y, rect.width, rect.height].every(Number.isFinite)
+  ) {
+    return null;
+  }
+  const round = (value: number) => Math.round(value * 100) / 100;
+  return {
+    x: round(rect.x),
+    y: round(rect.y),
+    width: round(rect.width),
+    height: round(rect.height),
+  };
+}
+
+function getIntersectionAreaPx2(a: DOMRect | null, b: DOMRect | null): number {
+  if (!hasUsableRect(a) || !hasUsableRect(b)) return 0;
+  const width = Math.max(0, Math.min(a.right, b.right) - Math.max(a.left, b.left));
+  const height = Math.max(0, Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top));
+  return Math.round(width * height * 100) / 100;
 }
 
 function unavailableGeometry(): GeometrySnapshot {
@@ -241,6 +297,12 @@ function unavailableGeometry(): GeometrySnapshot {
     minimumRenderedHeight: 0,
     overlapWithFooter: false,
     overlapWithDock: false,
+    footerOverlapAreaPx2: 0,
+    dockOverlapAreaPx2: 0,
+    viewportWidth: window.innerWidth,
+    viewportHeight: window.innerHeight,
+    stageScrollTop: null,
+    gridColumns: null,
   };
 }
 
@@ -257,6 +319,10 @@ function readGeometry(): GeometrySnapshot {
     const gridRect = grid?.getBoundingClientRect() ?? null;
     const footerRect = footer?.getBoundingClientRect() ?? null;
     const dockRect = dock?.getBoundingClientRect() ?? null;
+    const stageScrollTop = stage && Number.isFinite(stage.scrollTop) ? stage.scrollTop : null;
+    const viewportWidth = window.innerWidth;
+    const viewportHeight = window.innerHeight;
+    const gridColumns = getGridColumnCount();
     const footerStyle = footer ? window.getComputedStyle(footer) : null;
     const dockStyle = dock ? window.getComputedStyle(dock) : null;
     const footerOpacity = Number.parseFloat(footerStyle?.opacity ?? '');
@@ -348,6 +414,12 @@ function readGeometry(): GeometrySnapshot {
       hasUsableRect(gridRect) && dockVisible && hasUsableRect(dockRect)
       && intersects(gridRect, dockRect),
     );
+    const footerOverlapAreaPx2 = footerVisible && hasUsableRect(gridRect)
+      ? getIntersectionAreaPx2(gridRect, footerRect)
+      : 0;
+    const dockOverlapAreaPx2 = dockVisible && hasUsableRect(gridRect)
+      ? getIntersectionAreaPx2(gridRect, dockRect)
+      : 0;
 
     return {
       grid,
@@ -368,6 +440,12 @@ function readGeometry(): GeometrySnapshot {
       minimumRenderedHeight,
       overlapWithFooter,
       overlapWithDock,
+      footerOverlapAreaPx2,
+      dockOverlapAreaPx2,
+      viewportWidth,
+      viewportHeight,
+      stageScrollTop,
+      gridColumns,
     };
   } catch {
     return unavailableGeometry();
@@ -456,6 +534,21 @@ function buildRequest(step: KioskStep, profile: AccessibilityProfile, backend: B
       itemHeight: Math.round(geometry.minimumRenderedHeight),
       measurementsValid: geometry.measurementsValid,
     },
+    overlapDiagnostic: {
+      menuClearOfFooter: !geometry.overlapWithFooter,
+      menuClearOfQrDock: !geometry.overlapWithDock,
+      menuRect: toDiagnosticRect(geometry.gridRect),
+      footerRect: toDiagnosticRect(geometry.footerRect),
+      qrDockRect: toDiagnosticRect(geometry.dockRect),
+      footerOverlapAreaPx2: geometry.footerOverlapAreaPx2,
+      qrDockOverlapAreaPx2: geometry.dockOverlapAreaPx2,
+      viewport: {
+        width: geometry.viewportWidth,
+        height: geometry.viewportHeight,
+      },
+      stageScrollTop: geometry.stageScrollTop,
+      gridColumns: geometry.gridColumns,
+    },
     reason: isCentralBackend(backend) ? centralReason : commonSafetyReason,
     failureClass: isCentralBackend(backend) ? failureClass : commonSafetyFailure,
   };
@@ -509,6 +602,7 @@ function readContext(step: KioskStep, profile: AccessibilityProfile, backend: Ba
     request: built.request,
     reason: built.reason,
     failureClass: built.failureClass,
+    overlapDiagnostic: built.overlapDiagnostic,
   };
 }
 
@@ -903,6 +997,10 @@ export function useUniversalLayoutV2Fake({
               startedAt,
               safetyResult: 'fail',
               failureClass: latest.failureClass ?? 'APPLIED_PLAN_UNSAFE',
+              overlapDiagnostic: latest.failureClass === 'MENU_CONTROLS_OVERLAP'
+                ? latest.overlapDiagnostic
+                : undefined,
+              rollback: true,
             });
           }
           clearAppliedPlan(
