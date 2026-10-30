@@ -161,7 +161,7 @@ function logClientDiagnostic({
   const safeFailureClass = failureClass && CLIENT_DIAGNOSTIC_FAILURE_CLASSES.has(failureClass)
     ? failureClass
     : null;
-  console.info('[civil-universal-layout-v2-client]', {
+  console.info('[civil-universal-layout-v2-client]', JSON.stringify({
     stage,
     requestId,
     optionId: safeOptionId,
@@ -169,7 +169,7 @@ function logClientDiagnostic({
     safetyResult,
     failureClass: safeFailureClass,
     elapsedMs: Math.max(0, Math.round(performance.now() - startedAt)),
-  });
+  }));
 }
 
 function stableJson(value: unknown): string {
@@ -524,26 +524,46 @@ export function useUniversalLayoutV2Fake({
   backend?: Backend;
 }) {
   const [state, setState] = useState<FakeState>(emptyState);
+  const stateRef = useRef(state);
+  stateRef.current = state;
   const generation = useRef(0);
   const pendingRef = useRef(false);
   const controllerRef = useRef<AbortController | null>(null);
+  const attributeDiagnosticRequestRef = useRef<number | null>(null);
+  const safetyDiagnosticRequestRef = useRef<number | null>(null);
   const profileKey = stableJson(profile);
 
-  const cancel = useCallback((message = '') => {
+  const cancel = useCallback((
+    message = '',
+    clearReason: ClientDiagnosticFailureClass = 'REQUEST_CANCELLED',
+  ) => {
+    const previous = stateRef.current;
+    if (previous.plan && previous.requestId !== null && previous.startedAt !== null) {
+      logClientDiagnostic({
+        stage: 'active_plan_cleared',
+        requestId: previous.requestId,
+        optionId: getPlanOptionId(previous.plan),
+        startedAt: previous.startedAt,
+        safetyResult: 'not_checked',
+        failureClass: clearReason,
+      });
+    }
     generation.current += 1;
     controllerRef.current?.abort();
     controllerRef.current = null;
     pendingRef.current = false;
-    setState({ ...emptyState, message });
+    const nextState = { ...emptyState, message };
+    stateRef.current = nextState;
+    setState(nextState);
   }, []);
 
   useEffect(() => {
-    cancel();
+    cancel('', 'CONTEXT_CHANGED');
   }, [backend, cancel, enabled, profileKey, step]);
 
   useEffect(() => {
     if (!enabled) return;
-    const cancelForViewportChange = () => cancel();
+    const cancelForViewportChange = () => cancel('', 'CONTEXT_CHANGED');
     window.addEventListener('resize', cancelForViewportChange);
     window.addEventListener('orientationchange', cancelForViewportChange);
     return () => {
@@ -555,28 +575,51 @@ export function useUniversalLayoutV2Fake({
   const apply = useCallback(async (optionId: typeof CIVIL_V2_SAFE_LIST_OPTION_ID | null) => {
     if (!enabled || step !== 'main-menu' || pendingRef.current) return;
     if (optionId === null) {
-      cancel();
+      cancel('', 'MANUAL_PLAN_CLEAR');
       return;
     }
 
     const context = readContext(step, profile, backend);
     if (context.reason) {
-      setState({ ...emptyState, contextKey: context.key, message: context.reason });
+      const nextState = {
+        ...emptyState,
+        contextKey: context.key,
+        message: context.reason,
+      };
+      stateRef.current = nextState;
+      setState(nextState);
       return;
     }
 
+    const previous = stateRef.current;
+    if (previous.plan && previous.requestId !== null && previous.startedAt !== null) {
+      logClientDiagnostic({
+        stage: 'active_plan_cleared',
+        requestId: previous.requestId,
+        optionId: getPlanOptionId(previous.plan),
+        startedAt: previous.startedAt,
+        safetyResult: 'not_checked',
+        failureClass: 'REPLACED_BY_NEW_REQUEST',
+      });
+    }
     const requestGeneration = ++generation.current;
+    const startedAt = performance.now();
     const controller = new AbortController();
     controllerRef.current = controller;
     pendingRef.current = true;
-    setState({
+    const pendingState: FakeState = {
       plan: null,
       contextKey: context.key,
+      requestId: requestGeneration,
+      startedAt,
       pending: true,
       message: backend === 'central-fake'
         ? 'Development relay를 통해 중앙 Universal v2 Fake 계획을 확인하는 중입니다.'
         : '첨부된 Universal v2 계약으로 로컬 Fake 계획을 검증하는 중입니다.',
-    });
+    };
+    stateRef.current = pendingState;
+    setState(pendingState);
+    let validationDiagnosticSent = false;
 
     try {
       const endpoint = backend === 'central-fake'
@@ -592,7 +635,25 @@ export function useUniversalLayoutV2Fake({
         body: JSON.stringify(context.request),
       });
       const payload: unknown = await response.json().catch(() => null);
-      if (!response.ok || !isValidatedFakeEnvelope(payload)) {
+      const safeOptionId = getAllowedOptionId(payload);
+      logClientDiagnostic({
+        stage: 'client_plan_received',
+        requestId: requestGeneration,
+        optionId: safeOptionId,
+        startedAt,
+        safetyResult: 'not_checked',
+      });
+      const envelopeValid = response.ok && isValidatedFakeEnvelope(payload);
+      if (!envelopeValid) {
+        logClientDiagnostic({
+          stage: 'client_validator_rejected',
+          requestId: requestGeneration,
+          optionId: safeOptionId,
+          startedAt,
+          safetyResult: 'not_checked',
+          failureClass: response.ok ? 'INVALID_PLAN_ENVELOPE' : 'HTTP_RESPONSE_REJECTED',
+        });
+        validationDiagnosticSent = true;
         const errorCode = typeof payload === 'object' && payload !== null
           && typeof (payload as Record<string, unknown>).error === 'string'
           ? (payload as Record<string, string>).error
@@ -601,39 +662,113 @@ export function useUniversalLayoutV2Fake({
       }
       const latest = readContext(step, profile, backend);
       if (latest.key !== context.key || generation.current !== requestGeneration) {
+        logClientDiagnostic({
+          stage: 'client_validator_rejected',
+          requestId: requestGeneration,
+          optionId: safeOptionId,
+          startedAt,
+          safetyResult: 'not_checked',
+          failureClass: generation.current !== requestGeneration
+            ? 'REQUEST_GENERATION_CHANGED'
+            : 'STALE_CONTEXT',
+        });
+        validationDiagnosticSent = true;
         if (generation.current === requestGeneration) {
-          setState({
+          const staleState = {
             ...emptyState,
             contextKey: latest.key,
+            requestId: requestGeneration,
+            startedAt,
             message: '화면 구조가 바뀌어 오래된 계획을 폐기했습니다. 다시 확인해 주세요.',
-          });
+          };
+          stateRef.current = staleState;
+          setState(staleState);
         }
         return;
       }
 
-      setState({
+      logClientDiagnostic({
+        stage: 'client_validator_passed',
+        requestId: requestGeneration,
+        optionId: safeOptionId,
+        startedAt,
+        safetyResult: 'not_checked',
+      });
+      validationDiagnosticSent = true;
+      const activeState: FakeState = {
         plan: payload.plan,
         contextKey: context.key,
+        requestId: requestGeneration,
+        startedAt,
         pending: false,
         message: backend === 'central-fake' || backend === 'central-openai'
           ? `중앙 Development v2 ${backend === 'central-openai' ? 'OpenAI' : 'Fake'} 계획이 현재 모델과 호스트 정책 검증을 통과했습니다.`
           : '로컬 Development 정책으로 reserved-safe-list를 검증했습니다. 중앙 API와 AI는 호출하지 않았습니다.',
+      };
+      stateRef.current = activeState;
+      logClientDiagnostic({
+        stage: 'active_plan_set',
+        requestId: requestGeneration,
+        optionId: safeOptionId,
+        startedAt,
+        safetyResult: 'not_checked',
       });
+      setState(activeState);
     } catch (error) {
-      if (controller.signal.aborted) return;
+      if (controller.signal.aborted) {
+        if (!validationDiagnosticSent) {
+          logClientDiagnostic({
+            stage: 'client_validator_rejected',
+            requestId: requestGeneration,
+            optionId: null,
+            startedAt,
+            safetyResult: 'not_checked',
+            failureClass: 'REQUEST_ABORTED',
+          });
+        }
+        return;
+      }
       const latest = readContext(step, profile, backend);
-      if (latest.key !== context.key || generation.current !== requestGeneration) return;
+      if (latest.key !== context.key || generation.current !== requestGeneration) {
+        if (!validationDiagnosticSent) {
+          logClientDiagnostic({
+            stage: 'client_validator_rejected',
+            requestId: requestGeneration,
+            optionId: null,
+            startedAt,
+            safetyResult: 'not_checked',
+            failureClass: generation.current !== requestGeneration
+              ? 'REQUEST_GENERATION_CHANGED'
+              : 'STALE_CONTEXT',
+          });
+        }
+        return;
+      }
+      if (!validationDiagnosticSent) {
+        logClientDiagnostic({
+          stage: 'client_validator_rejected',
+          requestId: requestGeneration,
+          optionId: null,
+          startedAt,
+          safetyResult: 'not_checked',
+          failureClass: 'REQUEST_FAILED',
+        });
+      }
       const errorCode = error instanceof Error ? error.message : 'INVALID_V2_PLAN';
       const message = isCentralBackend(backend)
         ? errorCode === 'RELAY_DISABLED'
           ? '중앙 v2 Development relay가 OFF입니다. 로컬 Fake 또는 기존 배치를 사용하세요.'
           : '중앙 v2 Development 계획을 받지 못했거나 검증에 실패했습니다. 기존 배치를 유지합니다.'
         : 'v2 Fake 계획이 공통 정책 검증을 통과하지 못해 기존 배치를 유지합니다.';
-      setState({
+      const errorState = {
         ...emptyState,
         contextKey: context.key,
+        requestId: requestGeneration,
+        startedAt,
         message,
-      });
+      };
+      stateRef.current = errorState;
+      setState(errorState);
     } finally {
       if (generation.current === requestGeneration) {
         pendingRef.current = false;
@@ -648,7 +783,9 @@ export function useUniversalLayoutV2Fake({
           ) {
             return currentState;
           }
-          return { ...currentState, plan: null, pending: false, message: '' };
+          const nextState = { ...currentState, plan: null, pending: false, message: '' };
+          stateRef.current = nextState;
+          return nextState;
         });
       }
     }
@@ -674,16 +811,61 @@ export function useUniversalLayoutV2Fake({
     if (!state.plan) return;
     const appliedPlan = state.plan;
     const appliedGeneration = generation.current;
+    const requestId = state.requestId ?? appliedGeneration;
+    const startedAt = state.startedAt ?? performance.now();
+    const optionId = getPlanOptionId(appliedPlan);
+    if (stateRef.current.plan !== appliedPlan) return;
+
+    const clearAppliedPlan = (contextKey: string, message: string, reason: ClientDiagnosticFailureClass) => {
+      if (stateRef.current.plan !== appliedPlan) return;
+      logClientDiagnostic({
+        stage: 'active_plan_cleared',
+        requestId,
+        optionId,
+        startedAt,
+        safetyResult: reason === 'STALE_CONTEXT' || reason === 'CONTEXT_CHANGED'
+          ? 'not_checked'
+          : 'fail',
+        failureClass: reason,
+      });
+      setState((current) => {
+        if (current.plan !== appliedPlan) return current;
+        const nextState = { ...emptyState, contextKey, message };
+        stateRef.current = nextState;
+        return nextState;
+      });
+    };
+
     if (state.contextKey !== currentContext.key) {
       const latest = readContext(step, profile, backend);
-      setState((current) => current.plan === appliedPlan
-        ? {
-            ...emptyState,
-            contextKey: latest.key,
-            message: '화면 조건이 바뀌어 오래된 계획을 폐기했습니다. 접근성 설정은 유지됩니다.',
-          }
-        : current);
+      logClientDiagnostic({
+        stage: 'post_apply_safety_failed',
+        requestId,
+        optionId,
+        startedAt,
+        safetyResult: 'fail',
+        failureClass: 'STALE_CONTEXT',
+      });
+      clearAppliedPlan(
+        latest.key,
+        '화면 조건이 바뀌어 오래된 계획을 폐기했습니다. 접근성 설정은 유지됩니다.',
+        'STALE_CONTEXT',
+      );
       return;
+    }
+
+    if (attributeDiagnosticRequestRef.current !== requestId) {
+      attributeDiagnosticRequestRef.current = requestId;
+      const grid = document.querySelector<HTMLElement>('.certificate-grid');
+      const attributeApplied = grid?.dataset.universalLayoutOption === optionId;
+      logClientDiagnostic({
+        stage: 'layout_attribute_applied',
+        requestId,
+        optionId,
+        startedAt,
+        safetyResult: attributeApplied ? 'not_checked' : 'fail',
+        failureClass: attributeApplied ? null : 'LAYOUT_ATTRIBUTE_NOT_APPLIED',
+      });
     }
 
     let firstFrame = 0;
@@ -693,23 +875,52 @@ export function useUniversalLayoutV2Fake({
         if (generation.current !== appliedGeneration) return;
         const latest = readContext(step, profile, backend);
         if (latest.key !== state.contextKey) {
-          setState((current) => current.plan === appliedPlan
-            ? {
-                ...emptyState,
-                contextKey: latest.key,
-                message: '화면 구조가 바뀌어 계획을 폐기했습니다. 접근성 설정은 유지됩니다.',
-              }
-            : current);
+          if (safetyDiagnosticRequestRef.current !== requestId) {
+            safetyDiagnosticRequestRef.current = requestId;
+            logClientDiagnostic({
+              stage: 'post_apply_safety_failed',
+              requestId,
+              optionId,
+              startedAt,
+              safetyResult: 'fail',
+              failureClass: 'STALE_CONTEXT',
+            });
+          }
+          clearAppliedPlan(
+            latest.key,
+            '화면 구조가 바뀌어 계획을 폐기했습니다. 접근성 설정은 유지됩니다.',
+            'STALE_CONTEXT',
+          );
           return;
         }
         if (latest.reason) {
-          setState((current) => current.plan === appliedPlan
-            ? {
-                ...emptyState,
-                contextKey: latest.key,
-                message: `적용 후 화면 안전 검사를 통과하지 못해 배치 계획만 해제했습니다. 접근성 설정은 유지됩니다. ${latest.reason}`,
-              }
-            : current);
+          if (safetyDiagnosticRequestRef.current !== requestId) {
+            safetyDiagnosticRequestRef.current = requestId;
+            logClientDiagnostic({
+              stage: 'post_apply_safety_failed',
+              requestId,
+              optionId,
+              startedAt,
+              safetyResult: 'fail',
+              failureClass: latest.failureClass ?? 'APPLIED_PLAN_UNSAFE',
+            });
+          }
+          clearAppliedPlan(
+            latest.key,
+            `적용 후 화면 안전 검사를 통과하지 못해 배치 계획만 해제했습니다. 접근성 설정은 유지됩니다. ${latest.reason}`,
+            latest.failureClass ?? 'APPLIED_PLAN_UNSAFE',
+          );
+          return;
+        }
+        if (safetyDiagnosticRequestRef.current !== requestId) {
+          safetyDiagnosticRequestRef.current = requestId;
+          logClientDiagnostic({
+            stage: 'post_apply_safety_passed',
+            requestId,
+            optionId,
+            startedAt,
+            safetyResult: 'pass',
+          });
         }
       });
     });
@@ -717,7 +928,16 @@ export function useUniversalLayoutV2Fake({
       window.cancelAnimationFrame(firstFrame);
       window.cancelAnimationFrame(secondFrame);
     };
-  }, [backend, currentContext.key, profile, state.contextKey, state.plan, step]);
+  }, [
+    backend,
+    currentContext.key,
+    profile,
+    state.contextKey,
+    state.plan,
+    state.requestId,
+    state.startedAt,
+    step,
+  ]);
 
   return {
     activeOptionId,
