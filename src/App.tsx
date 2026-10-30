@@ -374,7 +374,7 @@ function App() {
           return;
         }
         lastAutoQrEventRef.current = qrAppliedEvent.id;
-        void autoQrV2ApplyRef.current(CIVIL_V2_SAFE_LIST_OPTION_ID);
+        void autoQrV2ApplyRef.current(CIVIL_V2_SAFE_LIST_OPTION_ID, 'qr-auto');
       });
     });
   }, [accessibilityProfile, notice, qrAppliedEvent, step]);

@@ -65,14 +65,76 @@ type ClientOverlapDiagnostic = {
 };
 
 type ClientDiagnosticStage =
+  | 'request_started'
+  | 'qr_auto_request_started'
   | 'client_plan_received'
   | 'client_validator_passed'
   | 'client_validator_rejected'
   | 'active_plan_set'
   | 'layout_attribute_applied'
+  | 'first_animation_frame'
+  | 'second_animation_frame'
   | 'post_apply_safety_passed'
   | 'post_apply_safety_failed'
   | 'active_plan_cleared';
+
+type DevelopmentLayoutElement = {
+  rect: DiagnosticRect;
+  style: {
+    position: string;
+    display: string;
+    overflow: string;
+    overflowX: string;
+    overflowY: string;
+    height: string;
+    minHeight: string;
+    marginTop: string;
+    marginBottom: string;
+    paddingTop: string;
+    paddingBottom: string;
+  };
+};
+
+type DevelopmentLayoutSnapshot = {
+  gProfileConditions: {
+    viewport1080x1920: boolean;
+    largeText: boolean;
+    largeButtons: boolean;
+    highContrast: boolean;
+    bottomControls: boolean;
+    bottomControls70Percent: boolean;
+    easyLanguage: boolean;
+    reservedSafeListSelectorMatches: boolean;
+  };
+  viewport: {
+    innerWidth: number;
+    innerHeight: number;
+    visualWidth: number | null;
+    visualHeight: number | null;
+    visualScale: number | null;
+    visualOffsetTop: number | null;
+    devicePixelRatio: number;
+    windowScrollY: number;
+    stageScrollTop: number | null;
+  };
+  grid: {
+    optionId: string | null;
+    gridTemplateColumns: string | null;
+    columns: number | null;
+    gap: string | null;
+    marginTop: string | null;
+    marginBottom: string | null;
+    paddingTop: string | null;
+    paddingBottom: string | null;
+  };
+  elements: Record<string, DevelopmentLayoutElement | null>;
+  safety: {
+    menuClearOfFooter: boolean;
+    menuClearOfQrDock: boolean;
+    footerOverlapAreaPx2: number;
+    qrDockOverlapAreaPx2: number;
+  };
+};
 
 type ClientDiagnosticFailureClass =
   | CivilV2HostSafetyFailure
@@ -169,6 +231,9 @@ function logClientDiagnostic({
   startedAt,
   safetyResult,
   failureClass = null,
+  profile,
+  requestSource,
+  includeLayoutSnapshot = false,
 }: {
   stage: ClientDiagnosticStage;
   requestId: number;
@@ -176,20 +241,28 @@ function logClientDiagnostic({
   startedAt: number;
   safetyResult: DiagnosticSafetyResult;
   failureClass?: ClientDiagnosticFailureClass | null;
+  profile?: AccessibilityProfile;
+  requestSource?: 'manual' | 'qr-auto';
+  includeLayoutSnapshot?: boolean;
 }): void {
   if (!import.meta.env.DEV) return;
   const safeOptionId = optionId === CIVIL_V2_SAFE_LIST_OPTION_ID ? optionId : null;
   const safeFailureClass = failureClass && CLIENT_DIAGNOSTIC_FAILURE_CLASSES.has(failureClass)
     ? failureClass
     : null;
+  const layoutSnapshot = includeLayoutSnapshot
+    ? getDevelopmentLayoutSnapshot(profile)
+    : undefined;
   console.info('[civil-universal-layout-v2-client]', JSON.stringify({
     stage,
     requestId,
     optionId: safeOptionId,
+    ...(requestSource ? { requestSource } : {}),
     gridColumns: getGridColumnCount(),
     safetyResult,
     failureClass: safeFailureClass,
     elapsedMs: Math.max(0, Math.round(performance.now() - startedAt)),
+    ...(layoutSnapshot ? { layoutSnapshot } : {}),
   }));
 }
 
@@ -438,6 +511,118 @@ function readGeometry(): GeometrySnapshot {
   }
 }
 
+function getDevelopmentLayoutSnapshot(
+  profile?: AccessibilityProfile,
+): DevelopmentLayoutSnapshot | undefined {
+  if (!import.meta.env.DEV) return undefined;
+
+  const selectors = {
+    stage: '.stage',
+    machine: '.machine',
+    machineTop: '.machine-top',
+    screenShell: '.screen-shell',
+    screenHeader: '.screen-header',
+    screenContent: '.screen-content',
+    mainView: '.main-view',
+    titleBand: '.main-view .title-band',
+    demoBanner: '.demo-banner',
+    developmentPanel: '.universal-layout-v2-fake',
+    menu: '.certificate-grid',
+    footer: '.device-footer[data-a11y-slot="bottom-controls"]',
+    qrDock: '.a11y-qr-entry-dock',
+  } as const;
+  const elements = Object.fromEntries(
+    Object.entries(selectors).map(([name, selector]) => {
+      const element = document.querySelector<HTMLElement>(selector);
+      if (!element?.isConnected) return [name, null];
+      const rect = element.getBoundingClientRect();
+      const style = window.getComputedStyle(element);
+      return [name, {
+        rect: toDiagnosticRect(rect),
+        style: {
+          position: style.position,
+          display: style.display,
+          overflow: style.overflow,
+          overflowX: style.overflowX,
+          overflowY: style.overflowY,
+          height: style.height,
+          minHeight: style.minHeight,
+          marginTop: style.marginTop,
+          marginBottom: style.marginBottom,
+          paddingTop: style.paddingTop,
+          paddingBottom: style.paddingBottom,
+        },
+      }];
+    }),
+  ) as DevelopmentLayoutSnapshot['elements'];
+  const stage = document.querySelector<HTMLElement>(selectors.stage);
+  const grid = document.querySelector<HTMLElement>(selectors.menu);
+  const gridStyle = grid ? window.getComputedStyle(grid) : null;
+  const stageClasses = stage?.classList;
+  const viewport1080x1920 = window.matchMedia('(width: 1080px) and (height: 1920px)').matches;
+  const reservedSafeListSelectorMatches = Boolean(
+    viewport1080x1920
+    && stage?.matches(
+      '.stage.a11y-qr-entry-dock-home.a11y-qr-entry-dock-scroll-area.a11y-qr-entry-dock-bottom.a11y-text-large.a11y-controls-large.a11y-high-contrast.a11y-easy-language:has(.certificate-grid[data-universal-layout-option="reserved-safe-list"])',
+    ),
+  );
+  const geometry = readGeometry();
+  const overlap = geometry.developmentDiagnostic;
+  const visualViewport = window.visualViewport;
+
+  return {
+    gProfileConditions: {
+      viewport1080x1920,
+      largeText: Boolean(stageClasses?.contains('a11y-text-large')),
+      largeButtons: Boolean(stageClasses?.contains('a11y-controls-large')),
+      highContrast: Boolean(stageClasses?.contains('a11y-high-contrast')),
+      bottomControls: Boolean(
+        stageClasses?.contains('a11y-qr-entry-dock-bottom')
+        && stageClasses?.contains('a11y-bottom-viewport-enabled'),
+      ),
+      bottomControls70Percent: Boolean(
+        profile?.viewportMode?.mode === 'bottom'
+        && profile.viewportMode.heightPercent === 70
+        && stageClasses?.contains('a11y-bottom-viewport-enabled'),
+      ),
+      easyLanguage: Boolean(stageClasses?.contains('a11y-easy-language')),
+      reservedSafeListSelectorMatches,
+    },
+    viewport: {
+      innerWidth: window.innerWidth,
+      innerHeight: window.innerHeight,
+      visualWidth: visualViewport ? Math.round(visualViewport.width * 100) / 100 : null,
+      visualHeight: visualViewport ? Math.round(visualViewport.height * 100) / 100 : null,
+      visualScale: visualViewport ? Math.round(visualViewport.scale * 1000) / 1000 : null,
+      visualOffsetTop: visualViewport
+        ? Math.round(visualViewport.offsetTop * 100) / 100
+        : null,
+      devicePixelRatio: window.devicePixelRatio,
+      windowScrollY: Math.round(window.scrollY * 100) / 100,
+      stageScrollTop: stage ? Math.round(stage.scrollTop * 100) / 100 : null,
+    },
+    grid: {
+      optionId: grid?.dataset.universalLayoutOption === CIVIL_V2_SAFE_LIST_OPTION_ID
+        ? CIVIL_V2_SAFE_LIST_OPTION_ID
+        : null,
+      gridTemplateColumns: gridStyle?.gridTemplateColumns ?? null,
+      columns: getGridColumnCount(),
+      gap: gridStyle?.gap ?? null,
+      marginTop: gridStyle?.marginTop ?? null,
+      marginBottom: gridStyle?.marginBottom ?? null,
+      paddingTop: gridStyle?.paddingTop ?? null,
+      paddingBottom: gridStyle?.paddingBottom ?? null,
+    },
+    elements,
+    safety: {
+      menuClearOfFooter: overlap?.menuClearOfFooter ?? false,
+      menuClearOfQrDock: overlap?.menuClearOfQrDock ?? false,
+      footerOverlapAreaPx2: overlap?.footerOverlapAreaPx2 ?? 0,
+      qrDockOverlapAreaPx2: overlap?.qrDockOverlapAreaPx2 ?? 0,
+    },
+  };
+}
+
 function buildRequest(step: KioskStep, profile: AccessibilityProfile, backend: Backend) {
   const geometry = readGeometry();
   const grid = geometry.grid;
@@ -598,6 +783,8 @@ export function useUniversalLayoutV2Fake({
   const [state, setState] = useState<FakeState>(emptyState);
   const stateRef = useRef(state);
   stateRef.current = state;
+  const profileRef = useRef(profile);
+  profileRef.current = profile;
   const generation = useRef(0);
   const pendingRef = useRef(false);
   const controllerRef = useRef<AbortController | null>(null);
@@ -611,13 +798,15 @@ export function useUniversalLayoutV2Fake({
   ) => {
     const previous = stateRef.current;
     if (previous.plan && previous.requestId !== null && previous.startedAt !== null) {
-      logClientDiagnostic({
+      import.meta.env.DEV && logClientDiagnostic({
         stage: 'active_plan_cleared',
         requestId: previous.requestId,
         optionId: getPlanOptionId(previous.plan),
         startedAt: previous.startedAt,
         safetyResult: 'not_checked',
         failureClass: clearReason,
+        profile: profileRef.current,
+        includeLayoutSnapshot: true,
       });
     }
     generation.current += 1;
@@ -644,7 +833,10 @@ export function useUniversalLayoutV2Fake({
     };
   }, [cancel, enabled]);
 
-  const apply = useCallback(async (optionId: typeof CIVIL_V2_SAFE_LIST_OPTION_ID | null) => {
+  const apply = useCallback(async (
+    optionId: typeof CIVIL_V2_SAFE_LIST_OPTION_ID | null,
+    requestSource: 'manual' | 'qr-auto' = 'manual',
+  ) => {
     if (!enabled || step !== 'main-menu' || pendingRef.current) return;
     if (optionId === null) {
       cancel('', 'MANUAL_PLAN_CLEAR');
@@ -665,13 +857,15 @@ export function useUniversalLayoutV2Fake({
 
     const previous = stateRef.current;
     if (previous.plan && previous.requestId !== null && previous.startedAt !== null) {
-      logClientDiagnostic({
+      import.meta.env.DEV && logClientDiagnostic({
         stage: 'active_plan_cleared',
         requestId: previous.requestId,
         optionId: getPlanOptionId(previous.plan),
         startedAt: previous.startedAt,
         safetyResult: 'not_checked',
         failureClass: 'REPLACED_BY_NEW_REQUEST',
+        profile,
+        includeLayoutSnapshot: true,
       });
     }
     const requestGeneration = ++generation.current;
@@ -691,6 +885,16 @@ export function useUniversalLayoutV2Fake({
     };
     stateRef.current = pendingState;
     setState(pendingState);
+    import.meta.env.DEV && logClientDiagnostic({
+      stage: requestSource === 'qr-auto' ? 'qr_auto_request_started' : 'request_started',
+      requestId: requestGeneration,
+      optionId,
+      startedAt,
+      safetyResult: 'not_checked',
+      requestSource,
+      profile,
+      includeLayoutSnapshot: true,
+    });
     let validationDiagnosticSent = false;
 
     try {
@@ -708,22 +912,26 @@ export function useUniversalLayoutV2Fake({
       });
       const payload: unknown = await response.json().catch(() => null);
       const safeOptionId = getAllowedOptionId(payload);
-      logClientDiagnostic({
+      import.meta.env.DEV && logClientDiagnostic({
         stage: 'client_plan_received',
         requestId: requestGeneration,
         optionId: safeOptionId,
         startedAt,
         safetyResult: 'not_checked',
+        profile,
+        includeLayoutSnapshot: true,
       });
       const envelopeValid = response.ok && isValidatedFakeEnvelope(payload);
       if (!envelopeValid) {
-        logClientDiagnostic({
+        import.meta.env.DEV && logClientDiagnostic({
           stage: 'client_validator_rejected',
           requestId: requestGeneration,
           optionId: safeOptionId,
           startedAt,
           safetyResult: 'not_checked',
           failureClass: response.ok ? 'INVALID_PLAN_ENVELOPE' : 'HTTP_RESPONSE_REJECTED',
+          profile,
+          includeLayoutSnapshot: true,
         });
         validationDiagnosticSent = true;
         const errorCode = typeof payload === 'object' && payload !== null
@@ -734,7 +942,7 @@ export function useUniversalLayoutV2Fake({
       }
       const latest = readContext(step, profile, backend);
       if (latest.key !== context.key || generation.current !== requestGeneration) {
-        logClientDiagnostic({
+        import.meta.env.DEV && logClientDiagnostic({
           stage: 'client_validator_rejected',
           requestId: requestGeneration,
           optionId: safeOptionId,
@@ -743,6 +951,8 @@ export function useUniversalLayoutV2Fake({
           failureClass: generation.current !== requestGeneration
             ? 'REQUEST_GENERATION_CHANGED'
             : 'STALE_CONTEXT',
+          profile,
+          includeLayoutSnapshot: true,
         });
         validationDiagnosticSent = true;
         if (generation.current === requestGeneration) {
@@ -759,12 +969,14 @@ export function useUniversalLayoutV2Fake({
         return;
       }
 
-      logClientDiagnostic({
+      import.meta.env.DEV && logClientDiagnostic({
         stage: 'client_validator_passed',
         requestId: requestGeneration,
         optionId: safeOptionId,
         startedAt,
         safetyResult: 'not_checked',
+        profile,
+        includeLayoutSnapshot: true,
       });
       validationDiagnosticSent = true;
       const activeState: FakeState = {
@@ -778,24 +990,28 @@ export function useUniversalLayoutV2Fake({
           : '로컬 Development 정책으로 reserved-safe-list를 검증했습니다. 중앙 API와 AI는 호출하지 않았습니다.',
       };
       stateRef.current = activeState;
-      logClientDiagnostic({
+      import.meta.env.DEV && logClientDiagnostic({
         stage: 'active_plan_set',
         requestId: requestGeneration,
         optionId: safeOptionId,
         startedAt,
         safetyResult: 'not_checked',
+        profile,
+        includeLayoutSnapshot: true,
       });
       setState(activeState);
     } catch (error) {
       if (controller.signal.aborted) {
         if (!validationDiagnosticSent) {
-          logClientDiagnostic({
+          import.meta.env.DEV && logClientDiagnostic({
             stage: 'client_validator_rejected',
             requestId: requestGeneration,
             optionId: null,
             startedAt,
             safetyResult: 'not_checked',
             failureClass: 'REQUEST_ABORTED',
+            profile,
+            includeLayoutSnapshot: true,
           });
         }
         return;
@@ -803,7 +1019,7 @@ export function useUniversalLayoutV2Fake({
       const latest = readContext(step, profile, backend);
       if (latest.key !== context.key || generation.current !== requestGeneration) {
         if (!validationDiagnosticSent) {
-          logClientDiagnostic({
+          import.meta.env.DEV && logClientDiagnostic({
             stage: 'client_validator_rejected',
             requestId: requestGeneration,
             optionId: null,
@@ -812,18 +1028,22 @@ export function useUniversalLayoutV2Fake({
             failureClass: generation.current !== requestGeneration
               ? 'REQUEST_GENERATION_CHANGED'
               : 'STALE_CONTEXT',
+            profile,
+            includeLayoutSnapshot: true,
           });
         }
         return;
       }
       if (!validationDiagnosticSent) {
-        logClientDiagnostic({
+        import.meta.env.DEV && logClientDiagnostic({
           stage: 'client_validator_rejected',
           requestId: requestGeneration,
           optionId: null,
           startedAt,
           safetyResult: 'not_checked',
           failureClass: 'REQUEST_FAILED',
+          profile,
+          includeLayoutSnapshot: true,
         });
       }
       const errorCode = error instanceof Error ? error.message : 'INVALID_V2_PLAN';
@@ -890,7 +1110,7 @@ export function useUniversalLayoutV2Fake({
 
     const clearAppliedPlan = (contextKey: string, message: string, reason: ClientDiagnosticFailureClass) => {
       if (stateRef.current.plan !== appliedPlan) return;
-      logClientDiagnostic({
+      import.meta.env.DEV && logClientDiagnostic({
         stage: 'active_plan_cleared',
         requestId,
         optionId,
@@ -899,6 +1119,8 @@ export function useUniversalLayoutV2Fake({
           ? 'not_checked'
           : 'fail',
         failureClass: reason,
+        profile,
+        includeLayoutSnapshot: true,
       });
       setState((current) => {
         if (current.plan !== appliedPlan) return current;
@@ -910,13 +1132,15 @@ export function useUniversalLayoutV2Fake({
 
     if (state.contextKey !== currentContext.key) {
       const latest = readContext(step, profile, backend);
-      logClientDiagnostic({
+      import.meta.env.DEV && logClientDiagnostic({
         stage: 'post_apply_safety_failed',
         requestId,
         optionId,
         startedAt,
         safetyResult: 'fail',
         failureClass: 'STALE_CONTEXT',
+        profile,
+        includeLayoutSnapshot: true,
       });
       clearAppliedPlan(
         latest.key,
@@ -930,26 +1154,48 @@ export function useUniversalLayoutV2Fake({
       attributeDiagnosticRequestRef.current = requestId;
       const grid = document.querySelector<HTMLElement>('.certificate-grid');
       const attributeApplied = grid?.dataset.universalLayoutOption === optionId;
-      logClientDiagnostic({
+      import.meta.env.DEV && logClientDiagnostic({
         stage: 'layout_attribute_applied',
         requestId,
         optionId,
         startedAt,
         safetyResult: attributeApplied ? 'not_checked' : 'fail',
         failureClass: attributeApplied ? null : 'LAYOUT_ATTRIBUTE_NOT_APPLIED',
+        profile,
+        includeLayoutSnapshot: true,
       });
     }
 
     let firstFrame = 0;
     let secondFrame = 0;
     firstFrame = window.requestAnimationFrame(() => {
+      if (generation.current === appliedGeneration) {
+        import.meta.env.DEV && logClientDiagnostic({
+          stage: 'first_animation_frame',
+          requestId,
+          optionId,
+          startedAt,
+          safetyResult: 'not_checked',
+          profile,
+          includeLayoutSnapshot: true,
+        });
+      }
       secondFrame = window.requestAnimationFrame(() => {
         if (generation.current !== appliedGeneration) return;
+        import.meta.env.DEV && logClientDiagnostic({
+          stage: 'second_animation_frame',
+          requestId,
+          optionId,
+          startedAt,
+          safetyResult: 'not_checked',
+          profile,
+          includeLayoutSnapshot: true,
+        });
         const latest = readContext(step, profile, backend);
         if (latest.key !== state.contextKey) {
           if (safetyDiagnosticRequestRef.current !== requestId) {
             safetyDiagnosticRequestRef.current = requestId;
-            logClientDiagnostic({
+            import.meta.env.DEV && logClientDiagnostic({
               stage: 'post_apply_safety_failed',
               requestId,
               optionId,
@@ -983,16 +1229,19 @@ export function useUniversalLayoutV2Fake({
                 failureClass: 'MENU_CONTROLS_OVERLAP',
                 elapsedMs: Math.max(0, Math.round(performance.now() - startedAt)),
                 overlapDiagnostic: latest.overlapDiagnostic,
+                layoutSnapshot: getDevelopmentLayoutSnapshot(profile),
                 rollback: true,
               }));
             } else {
-              logClientDiagnostic({
+              import.meta.env.DEV && logClientDiagnostic({
                 stage: 'post_apply_safety_failed',
                 requestId,
                 optionId,
                 startedAt,
                 safetyResult: 'fail',
                 failureClass: latest.failureClass ?? 'APPLIED_PLAN_UNSAFE',
+                profile,
+                includeLayoutSnapshot: true,
               });
             }
           }
@@ -1005,12 +1254,14 @@ export function useUniversalLayoutV2Fake({
         }
         if (safetyDiagnosticRequestRef.current !== requestId) {
           safetyDiagnosticRequestRef.current = requestId;
-          logClientDiagnostic({
+          import.meta.env.DEV && logClientDiagnostic({
             stage: 'post_apply_safety_passed',
             requestId,
             optionId,
             startedAt,
             safetyResult: 'pass',
+            profile,
+            includeLayoutSnapshot: true,
           });
         }
       });
