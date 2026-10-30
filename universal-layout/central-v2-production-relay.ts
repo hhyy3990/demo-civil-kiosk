@@ -70,6 +70,7 @@ export type CivilProductionRelayConfig = {
   hostPolicyVerified: boolean;
   centralProductionUrl?: string;
   hostAiToken?: string;
+  productionExternalAccessToken?: string;
   sessionSecret?: string;
   fetcher?: typeof fetch;
   requestTimeoutMs?: number;
@@ -113,6 +114,7 @@ export function isCivilProductionV2RelayReady(config: CivilProductionRelayConfig
     && config.hostPolicyVerified
     && Boolean(getSafeProductionOrigin(config.centralProductionUrl))
     && isConfiguredSecret(config.hostAiToken)
+    && isConfiguredSecret(config.productionExternalAccessToken)
     && isConfiguredSecret(config.sessionSecret);
 }
 
@@ -331,6 +333,7 @@ export function createCivilProductionV2Forwarder(
             Accept: 'application/json',
             'Content-Type': 'application/json',
             'X-Host-AI-Token': config.hostAiToken!,
+            Authorization: `Bearer ${config.productionExternalAccessToken!}`,
             'Idempotency-Key': idempotencyKey,
           },
           cache: 'no-store',

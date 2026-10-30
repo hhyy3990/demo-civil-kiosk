@@ -23,6 +23,7 @@ const productionV2Relay = createCivilProductionV2Middleware({
   hostPolicyVerified: process.env.CIVIL_UNIVERSAL_LAYOUT_V2_PRODUCTION_HOST_POLICY_VERIFIED === 'true',
   centralProductionUrl: process.env.CIVIL_UNIVERSAL_LAYOUT_CENTRAL_PRODUCTION_URL,
   hostAiToken: process.env.CIVIL_UNIVERSAL_LAYOUT_HOST_AI_TOKEN,
+  productionExternalAccessToken: process.env.CIVIL_UNIVERSAL_LAYOUT_PRODUCTION_EXTERNAL_ACCESS_TOKEN,
   sessionSecret: process.env.SESSION_SECRET,
   onDiagnostic: (stage, fields) => {
     console.info('[civil-production-v2]', JSON.stringify({ stage, ...fields }));

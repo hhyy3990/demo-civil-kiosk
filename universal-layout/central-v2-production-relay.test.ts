@@ -95,19 +95,24 @@ function readyConfig(fetcher: typeof fetch, extra: Record<string, unknown> = {})
     hostPolicyVerified: true,
     centralProductionUrl: 'https://central-production.example',
     hostAiToken: 'not-a-real-host-token',
+    productionExternalAccessToken: 'not-a-real-production-external-access-token',
     sessionSecret: 'not-a-real-session-secret',
     fetcher,
     ...extra,
   };
 }
 
-test('Production relay sends only strict model with host auth and idempotency; accepts a valid raw plan', async () => {
+test('Production relay sends separate platform and app auth with idempotency; accepts a valid raw plan', async () => {
   let calls = 0;
   const fetcher: typeof fetch = async (inputUrl, init) => {
     calls += 1;
     const url = new URL(String(inputUrl));
     assert.equal(url.pathname, '/api/production/universal-layout/v2/openai-plan');
     assert.equal(init?.method, 'POST');
+    assert.equal(
+      new Headers(init?.headers).get('authorization'),
+      'Bearer not-a-real-production-external-access-token',
+    );
     assert.equal(new Headers(init?.headers).get('X-Host-AI-Token'), 'not-a-real-host-token');
     assert.equal(new Headers(init?.headers).get('Idempotency-Key'), eventKey(1));
     const body = JSON.parse(String(init?.body));
@@ -140,6 +145,7 @@ test('Production relay stays blocked before fetch unless all independent gates a
     { productionRuntime: false },
     { hostPolicyVerified: false },
     { hostAiToken: '' },
+    { productionExternalAccessToken: '' },
     { centralProductionUrl: 'https://central-production.example/api/path' },
   ]) {
     const forward = createCivilProductionV2Forwarder(readyConfig(fetcher, overrides));
@@ -295,6 +301,87 @@ test('Production relay maps authentication and allowlist errors safely without r
       assert.equal(calls, 1);
     });
   }
+});
+
+test('Production relay safely handles 401/403/429/502/503 and redirect failures without extra fetches', async (t) => {
+  const cases = [
+    {
+      name: '401',
+      status: 401,
+      body: { error: 'AUTH_REQUIRED' },
+      expectedStatus: 502,
+      expectedCode: 'AUTH_REQUIRED',
+    },
+    {
+      name: '403',
+      status: 403,
+      body: { error: 'AUTH_REQUIRED' },
+      expectedStatus: 502,
+      expectedCode: 'AUTH_REQUIRED',
+    },
+    {
+      name: '429',
+      status: 429,
+      body: { error: 'PROVIDER_CALL_LIMIT_REACHED' },
+      expectedStatus: 429,
+      expectedCode: 'PROVIDER_CALL_LIMIT_REACHED',
+    },
+    {
+      name: '502',
+      status: 502,
+      body: { error: 'UPSTREAM_PRIVATE_DETAIL' },
+      expectedStatus: 502,
+      expectedCode: 'CENTRAL_PLAN_REJECTED',
+    },
+    {
+      name: '503',
+      status: 503,
+      body: { error: 'UPSTREAM_PRIVATE_DETAIL' },
+      expectedStatus: 502,
+      expectedCode: 'CENTRAL_PLAN_REJECTED',
+    },
+  ] as const;
+
+  for (const [index, scenario] of cases.entries()) {
+    await t.test(`HTTP ${scenario.name}`, async () => {
+      let calls = 0;
+      const fetcher: typeof fetch = async () => {
+        calls += 1;
+        return new Response(JSON.stringify(scenario.body), {
+          status: scenario.status,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      };
+      const forward = createCivilProductionV2Forwarder(readyConfig(fetcher));
+      const key = eventKey(70 + index);
+      const session = `session-error-${scenario.name}`;
+      const first = await forward(input, key, session);
+      const duplicate = await forward(input, key, session);
+      assert.equal(first.status, scenario.expectedStatus);
+      assert.equal((first.body as { error: string }).error, scenario.expectedCode);
+      assert.deepEqual(duplicate, first);
+      assert.equal(calls, 1);
+      assert.equal(JSON.stringify(first).includes('UPSTREAM_PRIVATE_DETAIL'), false);
+    });
+  }
+
+  await t.test('redirect rejection', async () => {
+    let calls = 0;
+    const fetcher: typeof fetch = async (_url, init) => {
+      calls += 1;
+      assert.equal(init?.redirect, 'error');
+      throw new TypeError('private redirect location must not be returned');
+    };
+    const forward = createCivilProductionV2Forwarder(readyConfig(fetcher));
+    const key = eventKey(80);
+    const first = await forward(input, key, 'session-redirect');
+    const duplicate = await forward(input, key, 'session-redirect');
+    assert.equal(first.status, 502);
+    assert.equal((first.body as { error: string }).error, 'CENTRAL_PLAN_FAILED');
+    assert.deepEqual(duplicate, first);
+    assert.equal(calls, 1);
+    assert.equal(JSON.stringify(first).includes('private redirect location'), false);
+  });
 });
 
 test('Production relay times out once, sanitizes the failure, and does not retry', async () => {
