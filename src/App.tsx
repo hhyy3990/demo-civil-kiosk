@@ -36,6 +36,7 @@ import {
 } from '../universal-layout/civil-layout-v2-fake-constants';
 import '@naebangsik/kiosk-accessibility-sdk/styles.css';
 import './styles.css';
+import './universal-layout-presets.css';
 
 if (import.meta.env.DEV) {
   void import('./universal-layout-mock.css');
