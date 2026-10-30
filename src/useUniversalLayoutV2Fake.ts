@@ -41,7 +41,7 @@ type ContextSnapshot = {
   request: unknown;
   reason: string | null;
   failureClass: ClientDiagnosticFailureClass | null;
-  overlapDiagnostic: ClientOverlapDiagnostic;
+  overlapDiagnostic?: ClientOverlapDiagnostic;
 };
 
 type DiagnosticRect = {
@@ -169,8 +169,6 @@ function logClientDiagnostic({
   startedAt,
   safetyResult,
   failureClass = null,
-  overlapDiagnostic,
-  rollback,
 }: {
   stage: ClientDiagnosticStage;
   requestId: number;
@@ -178,8 +176,6 @@ function logClientDiagnostic({
   startedAt: number;
   safetyResult: DiagnosticSafetyResult;
   failureClass?: ClientDiagnosticFailureClass | null;
-  overlapDiagnostic?: ClientOverlapDiagnostic;
-  rollback?: boolean;
 }): void {
   if (!import.meta.env.DEV) return;
   const safeOptionId = optionId === CIVIL_V2_SAFE_LIST_OPTION_ID ? optionId : null;
@@ -190,12 +186,10 @@ function logClientDiagnostic({
     stage,
     requestId,
     optionId: safeOptionId,
-    gridColumns: overlapDiagnostic?.gridColumns ?? getGridColumnCount(),
+    gridColumns: getGridColumnCount(),
     safetyResult,
     failureClass: safeFailureClass,
     elapsedMs: Math.max(0, Math.round(performance.now() - startedAt)),
-    ...(overlapDiagnostic ? { overlapDiagnostic } : {}),
-    ...(rollback !== undefined ? { rollback } : {}),
   }));
 }
 
@@ -237,12 +231,7 @@ type GeometrySnapshot = {
   minimumRenderedHeight: number;
   overlapWithFooter: boolean;
   overlapWithDock: boolean;
-  footerOverlapAreaPx2: number;
-  dockOverlapAreaPx2: number;
-  viewportWidth: number;
-  viewportHeight: number;
-  stageScrollTop: number | null;
-  gridColumns: number | null;
+  developmentDiagnostic?: ClientOverlapDiagnostic;
 };
 
 function hasUsableRect(rect: DOMRect | null | undefined): rect is DOMRect {
@@ -297,12 +286,6 @@ function unavailableGeometry(): GeometrySnapshot {
     minimumRenderedHeight: 0,
     overlapWithFooter: false,
     overlapWithDock: false,
-    footerOverlapAreaPx2: 0,
-    dockOverlapAreaPx2: 0,
-    viewportWidth: window.innerWidth,
-    viewportHeight: window.innerHeight,
-    stageScrollTop: null,
-    gridColumns: null,
   };
 }
 
@@ -319,10 +302,6 @@ function readGeometry(): GeometrySnapshot {
     const gridRect = grid?.getBoundingClientRect() ?? null;
     const footerRect = footer?.getBoundingClientRect() ?? null;
     const dockRect = dock?.getBoundingClientRect() ?? null;
-    const stageScrollTop = stage && Number.isFinite(stage.scrollTop) ? stage.scrollTop : null;
-    const viewportWidth = window.innerWidth;
-    const viewportHeight = window.innerHeight;
-    const gridColumns = getGridColumnCount();
     const footerStyle = footer ? window.getComputedStyle(footer) : null;
     const dockStyle = dock ? window.getComputedStyle(dock) : null;
     const footerOpacity = Number.parseFloat(footerStyle?.opacity ?? '');
@@ -414,14 +393,8 @@ function readGeometry(): GeometrySnapshot {
       hasUsableRect(gridRect) && dockVisible && hasUsableRect(dockRect)
       && intersects(gridRect, dockRect),
     );
-    const footerOverlapAreaPx2 = footerVisible && hasUsableRect(gridRect)
-      ? getIntersectionAreaPx2(gridRect, footerRect)
-      : 0;
-    const dockOverlapAreaPx2 = dockVisible && hasUsableRect(gridRect)
-      ? getIntersectionAreaPx2(gridRect, dockRect)
-      : 0;
 
-    return {
+    const snapshot: GeometrySnapshot = {
       grid,
       gridRect,
       footer,
@@ -440,13 +413,26 @@ function readGeometry(): GeometrySnapshot {
       minimumRenderedHeight,
       overlapWithFooter,
       overlapWithDock,
-      footerOverlapAreaPx2,
-      dockOverlapAreaPx2,
-      viewportWidth,
-      viewportHeight,
-      stageScrollTop,
-      gridColumns,
     };
+    if (import.meta.env.DEV) {
+      snapshot.developmentDiagnostic = {
+        menuClearOfFooter: !overlapWithFooter,
+        menuClearOfQrDock: !overlapWithDock,
+        menuRect: toDiagnosticRect(gridRect),
+        footerRect: toDiagnosticRect(footerRect),
+        qrDockRect: toDiagnosticRect(dockRect),
+        footerOverlapAreaPx2: footerVisible && hasUsableRect(gridRect)
+          ? getIntersectionAreaPx2(gridRect, footerRect)
+          : 0,
+        qrDockOverlapAreaPx2: dockVisible && hasUsableRect(gridRect)
+          ? getIntersectionAreaPx2(gridRect, dockRect)
+          : 0,
+        viewport: { width: window.innerWidth, height: window.innerHeight },
+        stageScrollTop: stage && Number.isFinite(stage.scrollTop) ? stage.scrollTop : null,
+        gridColumns: getGridColumnCount(),
+      };
+    }
+    return snapshot;
   } catch {
     return unavailableGeometry();
   }
@@ -512,7 +498,7 @@ function buildRequest(step: KioskStep, profile: AccessibilityProfile, backend: B
       : !eligibility.centralProfileAllowed
         ? 'CENTRAL_PROFILE_NOT_ALLOWED'
         : commonSafetyFailure;
-  return {
+  const result = {
     request: { request, eligibility },
     eligibility,
     geometry: {
@@ -534,24 +520,13 @@ function buildRequest(step: KioskStep, profile: AccessibilityProfile, backend: B
       itemHeight: Math.round(geometry.minimumRenderedHeight),
       measurementsValid: geometry.measurementsValid,
     },
-    overlapDiagnostic: {
-      menuClearOfFooter: !geometry.overlapWithFooter,
-      menuClearOfQrDock: !geometry.overlapWithDock,
-      menuRect: toDiagnosticRect(geometry.gridRect),
-      footerRect: toDiagnosticRect(geometry.footerRect),
-      qrDockRect: toDiagnosticRect(geometry.dockRect),
-      footerOverlapAreaPx2: geometry.footerOverlapAreaPx2,
-      qrDockOverlapAreaPx2: geometry.dockOverlapAreaPx2,
-      viewport: {
-        width: geometry.viewportWidth,
-        height: geometry.viewportHeight,
-      },
-      stageScrollTop: geometry.stageScrollTop,
-      gridColumns: geometry.gridColumns,
-    },
     reason: isCentralBackend(backend) ? centralReason : commonSafetyReason,
     failureClass: isCentralBackend(backend) ? failureClass : commonSafetyFailure,
   };
+  if (import.meta.env.DEV && geometry.developmentDiagnostic) {
+    return { ...result, overlapDiagnostic: geometry.developmentDiagnostic };
+  }
+  return result;
 }
 
 function isValidatedFakeEnvelope(value: unknown): value is {
@@ -592,7 +567,7 @@ function isValidatedFakeEnvelope(value: unknown): value is {
 
 function readContext(step: KioskStep, profile: AccessibilityProfile, backend: Backend): ContextSnapshot {
   const built = buildRequest(step, profile, backend);
-  return {
+  const snapshot: ContextSnapshot = {
     key: stableJson({
       backend,
       step,
@@ -602,8 +577,11 @@ function readContext(step: KioskStep, profile: AccessibilityProfile, backend: Ba
     request: built.request,
     reason: built.reason,
     failureClass: built.failureClass,
-    overlapDiagnostic: built.overlapDiagnostic,
   };
+  if (import.meta.env.DEV && 'overlapDiagnostic' in built) {
+    snapshot.overlapDiagnostic = built.overlapDiagnostic as ClientOverlapDiagnostic;
+  }
+  return snapshot;
 }
 
 export function useUniversalLayoutV2Fake({
@@ -990,18 +968,33 @@ export function useUniversalLayoutV2Fake({
         if (latest.reason) {
           if (safetyDiagnosticRequestRef.current !== requestId) {
             safetyDiagnosticRequestRef.current = requestId;
-            logClientDiagnostic({
-              stage: 'post_apply_safety_failed',
-              requestId,
-              optionId,
-              startedAt,
-              safetyResult: 'fail',
-              failureClass: latest.failureClass ?? 'APPLIED_PLAN_UNSAFE',
-              overlapDiagnostic: latest.failureClass === 'MENU_CONTROLS_OVERLAP'
-                ? latest.overlapDiagnostic
-                : undefined,
-              rollback: true,
-            });
+            if (
+              latest.failureClass === 'MENU_CONTROLS_OVERLAP'
+              && import.meta.env.DEV
+              && latest.overlapDiagnostic
+            ) {
+              const safeOptionId = optionId === CIVIL_V2_SAFE_LIST_OPTION_ID ? optionId : null;
+              console.info('[civil-universal-layout-v2-client]', JSON.stringify({
+                stage: 'post_apply_safety_failed',
+                requestId,
+                optionId: safeOptionId,
+                gridColumns: latest.overlapDiagnostic.gridColumns,
+                safetyResult: 'fail',
+                failureClass: 'MENU_CONTROLS_OVERLAP',
+                elapsedMs: Math.max(0, Math.round(performance.now() - startedAt)),
+                overlapDiagnostic: latest.overlapDiagnostic,
+                rollback: true,
+              }));
+            } else {
+              logClientDiagnostic({
+                stage: 'post_apply_safety_failed',
+                requestId,
+                optionId,
+                startedAt,
+                safetyResult: 'fail',
+                failureClass: latest.failureClass ?? 'APPLIED_PLAN_UNSAFE',
+              });
+            }
           }
           clearAppliedPlan(
             latest.key,
