@@ -55,10 +55,14 @@ type ClientOverlapDiagnostic = {
   menuClearOfFooter: boolean;
   menuClearOfQrDock: boolean;
   menuRect: DiagnosticRect;
+  menuVisibleRect: DiagnosticRect;
+  stageRect: DiagnosticRect;
   footerRect: DiagnosticRect;
   qrDockRect: DiagnosticRect;
   footerOverlapAreaPx2: number;
   qrDockOverlapAreaPx2: number;
+  lastActionReachableByScroll: boolean | null;
+  scrollPositionRestored: boolean;
   viewport: { width: number; height: number };
   stageScrollTop: number | null;
   gridColumns: number | null;
@@ -133,6 +137,9 @@ type DevelopmentLayoutSnapshot = {
     menuClearOfQrDock: boolean;
     footerOverlapAreaPx2: number;
     qrDockOverlapAreaPx2: number;
+    lastActionReachableByScroll: boolean | null;
+    scrollPositionRestored: boolean;
+    clippingKnown: boolean;
   };
 };
 
@@ -234,6 +241,7 @@ function logClientDiagnostic({
   profile,
   requestSource,
   includeLayoutSnapshot = false,
+  overlapDiagnostic,
 }: {
   stage: ClientDiagnosticStage;
   requestId: number;
@@ -244,6 +252,7 @@ function logClientDiagnostic({
   profile?: AccessibilityProfile;
   requestSource?: 'manual' | 'qr-auto';
   includeLayoutSnapshot?: boolean;
+  overlapDiagnostic?: ClientOverlapDiagnostic;
 }): void {
   if (!import.meta.env.DEV) return;
   const safeOptionId = optionId === CIVIL_V2_SAFE_LIST_OPTION_ID ? optionId : null;
@@ -263,6 +272,7 @@ function logClientDiagnostic({
     failureClass: safeFailureClass,
     elapsedMs: Math.max(0, Math.round(performance.now() - startedAt)),
     ...(layoutSnapshot ? { layoutSnapshot } : {}),
+    ...(overlapDiagnostic ? { overlapDiagnostic } : {}),
   }));
 }
 
@@ -288,6 +298,7 @@ function mapAccessibilityProfile(profile: AccessibilityProfile) {
 type GeometrySnapshot = {
   grid: HTMLElement | null;
   gridRect: DOMRect | null;
+  visibleGridRect: DOMRect | null;
   footer: HTMLElement | null;
   footerRect: DOMRect | null;
   footerPosition: string;
@@ -301,6 +312,9 @@ type GeometrySnapshot = {
   dockReservesBottom: boolean;
   allIdsMatch: boolean;
   menuHitTestSafe: boolean;
+  lastActionReachableByScroll: boolean | null;
+  scrollPositionRestored: boolean;
+  clippingKnown: boolean;
   minimumRenderedHeight: number;
   overlapWithFooter: boolean;
   overlapWithDock: boolean;
@@ -339,10 +353,99 @@ function getIntersectionAreaPx2(a: DOMRect | null, b: DOMRect | null): number {
   return Math.round(width * height * 100) / 100;
 }
 
+type ClippedRectMeasurement = {
+  rect: DOMRect | null;
+  supported: boolean;
+};
+
+function getVisibleClippedRect(element: HTMLElement): ClippedRectMeasurement {
+  const elementRect = element.getBoundingClientRect();
+  if (!hasUsableRect(elementRect)) return { rect: null, supported: false };
+
+  const visualViewport = window.visualViewport;
+  let left = Math.max(elementRect.left, 0, visualViewport?.offsetLeft ?? 0);
+  let top = Math.max(elementRect.top, 0, visualViewport?.offsetTop ?? 0);
+  let right = Math.min(
+    elementRect.right,
+    window.innerWidth,
+    (visualViewport?.offsetLeft ?? 0) + (visualViewport?.width ?? window.innerWidth),
+  );
+  let bottom = Math.min(
+    elementRect.bottom,
+    window.innerHeight,
+    (visualViewport?.offsetTop ?? 0) + (visualViewport?.height ?? window.innerHeight),
+  );
+  let supported = true;
+
+  for (let ancestor = element.parentElement; ancestor; ancestor = ancestor.parentElement) {
+    const style = window.getComputedStyle(ancestor);
+    const clipsX = ['auto', 'scroll', 'hidden', 'clip', 'overlay'].includes(style.overflowX);
+    const clipsY = ['auto', 'scroll', 'hidden', 'clip', 'overlay'].includes(style.overflowY);
+    if (
+      (style.clipPath && style.clipPath !== 'none')
+      || (style.maskImage && style.maskImage !== 'none')
+      || (style.clip && style.clip !== 'auto')
+      || (style.contain && style.contain.split(/\s+/).includes('paint'))
+      || (style.overflowClipMargin && style.overflowClipMargin !== '0px')
+    ) {
+      supported = false;
+      break;
+    }
+    if (!clipsX && !clipsY) continue;
+
+    const ancestorRect = ancestor.getBoundingClientRect();
+    if (![ancestorRect.left, ancestorRect.top, ancestorRect.width, ancestorRect.height].every(Number.isFinite)) {
+      supported = false;
+      break;
+    }
+    const transform = style.transform;
+    const scaleX = ancestor.offsetWidth > 0 ? ancestorRect.width / ancestor.offsetWidth : 1;
+    const scaleY = ancestor.offsetHeight > 0 ? ancestorRect.height / ancestor.offsetHeight : 1;
+    if (transform && transform !== 'none') {
+      try {
+        const matrix = new DOMMatrixReadOnly(transform);
+        if (
+          Math.abs(matrix.b) > 0.0001
+          || Math.abs(matrix.c) > 0.0001
+          || matrix.a <= 0
+          || matrix.d <= 0
+        ) {
+          supported = false;
+          break;
+        }
+      } catch {
+        supported = false;
+        break;
+      }
+    }
+    const clipLeft = ancestorRect.left + ancestor.clientLeft * scaleX;
+    const clipTop = ancestorRect.top + ancestor.clientTop * scaleY;
+    const clipRight = clipLeft + ancestor.clientWidth * scaleX;
+    const clipBottom = clipTop + ancestor.clientHeight * scaleY;
+    if (clipsX) {
+      left = Math.max(left, clipLeft);
+      right = Math.min(right, clipRight);
+    }
+    if (clipsY) {
+      top = Math.max(top, clipTop);
+      bottom = Math.min(bottom, clipBottom);
+    }
+  }
+
+  if (!supported || right <= left || bottom <= top) {
+    return { rect: null, supported };
+  }
+  return {
+    rect: new DOMRect(left, top, right - left, bottom - top),
+    supported: true,
+  };
+}
+
 function unavailableGeometry(): GeometrySnapshot {
   return {
     grid: null,
     gridRect: null,
+    visibleGridRect: null,
     footer: null,
     footerRect: null,
     footerPosition: 'unavailable',
@@ -356,13 +459,16 @@ function unavailableGeometry(): GeometrySnapshot {
     dockReservesBottom: false,
     allIdsMatch: false,
     menuHitTestSafe: false,
+    lastActionReachableByScroll: null,
+    scrollPositionRestored: false,
+    clippingKnown: false,
     minimumRenderedHeight: 0,
     overlapWithFooter: false,
     overlapWithDock: false,
   };
 }
 
-function readGeometry(): GeometrySnapshot {
+function readGeometry(options: { verifyLastActionReachability?: boolean } = {}): GeometrySnapshot {
   try {
     const stage = document.querySelector<HTMLElement>('.stage');
     const stageRect = stage?.getBoundingClientRect() ?? null;
@@ -373,6 +479,8 @@ function readGeometry(): GeometrySnapshot {
       ? Array.from(grid.querySelectorAll<HTMLElement>('[data-a11y-action-id]'))
       : [];
     const gridRect = grid?.getBoundingClientRect() ?? null;
+    const visibleGridMeasurement = grid ? getVisibleClippedRect(grid) : { rect: null, supported: false };
+    const visibleGridRect = visibleGridMeasurement.rect;
     const footerRect = footer?.getBoundingClientRect() ?? null;
     const dockRect = dock?.getBoundingClientRect() ?? null;
     const footerStyle = footer ? window.getComputedStyle(footer) : null;
@@ -414,33 +522,129 @@ function readGeometry(): GeometrySnapshot {
     const allIdsMatch = actions.length === CIVIL_V2_ITEM_IDS.length
       && actions.every((action, index) => action.dataset.a11yActionId === CIVIL_V2_ITEM_IDS[index]);
     const actionRects = actions.map((action) => action.getBoundingClientRect());
+    const intersects = (a: DOMRect, b: DOMRect) =>
+      a.left < b.right && a.right > b.left && a.top < b.bottom && a.bottom > b.top;
+    let clippingKnown = visibleGridMeasurement.supported;
     let visibleActionCount = 0;
     let menuHitTestSafe = Boolean(stage && hasUsableRect(stageRect) && actions.length > 0);
+    let actionOverlapWithFooter = false;
+    let actionOverlapWithDock = false;
     if (stage && hasUsableRect(stageRect)) {
-      for (const [index, actionRect] of actionRects.entries()) {
+      for (const action of actions) {
+        const actionMeasurement = getVisibleClippedRect(action);
+        if (!actionMeasurement.supported) {
+          clippingKnown = false;
+          menuHitTestSafe = false;
+          continue;
+        }
+        const actionRect = action.getBoundingClientRect();
         if (!hasUsableRect(actionRect)) {
           menuHitTestSafe = false;
           continue;
         }
-        const centerX = actionRect.left + actionRect.width / 2;
-        const centerY = actionRect.top + actionRect.height / 2;
-        const insideStage = centerX >= stageRect.left + stage.clientLeft
-          && centerX <= stageRect.left + stage.clientLeft + stage.clientWidth
-          && centerY >= stageRect.top + stage.clientTop
-          && centerY <= stageRect.top + stage.clientTop + stage.clientHeight
-          && centerX >= 0
-          && centerX <= window.innerWidth
-          && centerY >= 0
-          && centerY <= window.innerHeight;
-        if (!insideStage) continue;
+        const visibleActionRect = actionMeasurement.rect;
+        if (!visibleActionRect) continue;
         visibleActionCount += 1;
+        if (footerVisible && hasUsableRect(footerRect) && intersects(visibleActionRect, footerRect)) {
+          actionOverlapWithFooter = true;
+        }
+        if (dockVisible && hasUsableRect(dockRect) && intersects(visibleActionRect, dockRect)) {
+          actionOverlapWithDock = true;
+        }
+        const centerX = visibleActionRect.left + visibleActionRect.width / 2;
+        const centerY = visibleActionRect.top + visibleActionRect.height / 2;
         const hit = document.elementFromPoint(centerX, centerY);
-        if (!hit || (hit !== actions[index] && !actions[index]?.contains(hit))) {
+        if (!hit || (hit !== action && !action.contains(hit))) {
           menuHitTestSafe = false;
         }
       }
     }
     menuHitTestSafe = menuHitTestSafe && visibleActionCount > 0;
+
+    let lastActionReachableByScroll: boolean | null = null;
+    let scrollPositionRestored = true;
+    if (options.verifyLastActionReachability) {
+      const lastAction = actions[actions.length - 1] ?? null;
+      lastActionReachableByScroll = false;
+      if (!stage || !lastAction || !hasUsableRect(stageRect)) {
+        menuHitTestSafe = false;
+        scrollPositionRestored = false;
+      } else {
+        const originalScrollTop = stage.scrollTop;
+        const initialLastActionRect = lastAction.getBoundingClientRect();
+        const stageVisibleMeasurement = getVisibleClippedRect(stage);
+        const stageClientRect = new DOMRect(
+          stageRect.left + stage.clientLeft,
+          stageRect.top + stage.clientTop,
+          stage.clientWidth,
+          stage.clientHeight,
+        );
+        let stageClipRect: DOMRect | null = stageClientRect;
+        if (stageVisibleMeasurement.rect) {
+          const visibleStage = stageVisibleMeasurement.rect;
+          const clipLeft = Math.max(stageClientRect.left, visibleStage.left);
+          const clipTop = Math.max(stageClientRect.top, visibleStage.top);
+          const clipRight = Math.min(stageClientRect.right, visibleStage.right);
+          const clipBottom = Math.min(stageClientRect.bottom, visibleStage.bottom);
+          stageClipRect = clipRight > clipLeft && clipBottom > clipTop
+            ? new DOMRect(clipLeft, clipTop, clipRight - clipLeft, clipBottom - clipTop)
+            : null;
+        } else {
+          clippingKnown = false;
+          stageClipRect = null;
+        }
+
+        try {
+          if (!stageClipRect || !hasUsableRect(initialLastActionRect)) {
+            clippingKnown = false;
+          } else {
+            const maxScrollTop = Math.max(0, stage.scrollHeight - stage.clientHeight);
+            let targetScrollTop = originalScrollTop;
+            if (initialLastActionRect.bottom > stageClipRect.bottom) {
+              targetScrollTop += initialLastActionRect.bottom - stageClipRect.bottom;
+            } else if (initialLastActionRect.top < stageClipRect.top) {
+              targetScrollTop -= stageClipRect.top - initialLastActionRect.top;
+            }
+            targetScrollTop = Math.min(maxScrollTop, Math.max(0, targetScrollTop));
+            stage.scrollTop = targetScrollTop;
+            const reachedTarget = Math.abs(stage.scrollTop - targetScrollTop) <= 1;
+            const lastActionRect = lastAction.getBoundingClientRect();
+            const lastVisibleMeasurement = getVisibleClippedRect(lastAction);
+            if (!lastVisibleMeasurement.supported) clippingKnown = false;
+            const lastVisibleRect = lastVisibleMeasurement.rect;
+            const fullyVisible = Boolean(
+              lastVisibleRect
+              && lastVisibleRect.left <= lastActionRect.left + 1
+              && lastVisibleRect.top <= lastActionRect.top + 1
+              && lastVisibleRect.right >= lastActionRect.right - 1
+              && lastVisibleRect.bottom >= lastActionRect.bottom - 1,
+            );
+            const centerX = lastActionRect.left + lastActionRect.width / 2;
+            const centerY = lastActionRect.top + lastActionRect.height / 2;
+            const hit = fullyVisible ? document.elementFromPoint(centerX, centerY) : null;
+            const hitTarget = Boolean(hit && (hit === lastAction || lastAction.contains(hit)));
+            const clearOfControls = Boolean(
+              lastVisibleRect
+              && (!footerVisible || !hasUsableRect(footerRect) || !intersects(lastVisibleRect, footerRect))
+              && (!dockVisible || !hasUsableRect(dockRect) || !intersects(lastVisibleRect, dockRect)),
+            );
+            lastActionReachableByScroll = Boolean(
+              clippingKnown && reachedTarget && fullyVisible && hitTarget && clearOfControls,
+            );
+          }
+        } catch {
+          clippingKnown = false;
+          lastActionReachableByScroll = false;
+        } finally {
+          stage.scrollTop = originalScrollTop;
+          scrollPositionRestored = Math.abs(stage.scrollTop - originalScrollTop) <= 0.5;
+        }
+        menuHitTestSafe = menuHitTestSafe
+          && lastActionReachableByScroll
+          && scrollPositionRestored;
+      }
+    }
+
     const measurementsValid = Boolean(
       stage?.isConnected
       && hasUsableRect(stageRect)
@@ -448,28 +652,34 @@ function readGeometry(): GeometrySnapshot {
       && footer?.isConnected
       && dock?.isConnected
       && hasUsableRect(gridRect)
+      && hasUsableRect(visibleGridRect)
       && hasUsableRect(footerRect)
       && hasUsableRect(dockRect)
       && actionRects.length === CIVIL_V2_ITEM_IDS.length
       && actionRects.every(hasUsableRect),
-    );
+    ) && clippingKnown && scrollPositionRestored;
     const minimumRenderedHeight = actionRects.length && actionRects.every(hasUsableRect)
       ? Math.min(...actionRects.map((rect) => rect.height))
       : 0;
-    const intersects = (a: DOMRect, b: DOMRect) =>
-      a.left < b.right && a.right > b.left && a.top < b.bottom && a.bottom > b.top;
     const overlapWithFooter = Boolean(
-      hasUsableRect(gridRect) && footerVisible && hasUsableRect(footerRect)
-      && intersects(gridRect, footerRect),
+      hasUsableRect(visibleGridRect)
+      && footerVisible
+      && hasUsableRect(footerRect)
+      && intersects(visibleGridRect, footerRect)
+      || actionOverlapWithFooter,
     );
     const overlapWithDock = Boolean(
-      hasUsableRect(gridRect) && dockVisible && hasUsableRect(dockRect)
-      && intersects(gridRect, dockRect),
+      hasUsableRect(visibleGridRect)
+      && dockVisible
+      && hasUsableRect(dockRect)
+      && intersects(visibleGridRect, dockRect)
+      || actionOverlapWithDock,
     );
 
     const snapshot: GeometrySnapshot = {
       grid,
       gridRect,
+      visibleGridRect,
       footer,
       footerRect,
       footerPosition: footerStyle?.position ?? 'missing',
@@ -483,6 +693,9 @@ function readGeometry(): GeometrySnapshot {
       dockReservesBottom,
       allIdsMatch,
       menuHitTestSafe,
+      lastActionReachableByScroll,
+      scrollPositionRestored,
+      clippingKnown,
       minimumRenderedHeight,
       overlapWithFooter,
       overlapWithDock,
@@ -492,14 +705,18 @@ function readGeometry(): GeometrySnapshot {
         menuClearOfFooter: !overlapWithFooter,
         menuClearOfQrDock: !overlapWithDock,
         menuRect: toDiagnosticRect(gridRect),
+        menuVisibleRect: toDiagnosticRect(visibleGridRect),
+        stageRect: toDiagnosticRect(stageRect),
         footerRect: toDiagnosticRect(footerRect),
         qrDockRect: toDiagnosticRect(dockRect),
         footerOverlapAreaPx2: footerVisible && hasUsableRect(gridRect)
-          ? getIntersectionAreaPx2(gridRect, footerRect)
+          ? getIntersectionAreaPx2(visibleGridRect, footerRect)
           : 0,
         qrDockOverlapAreaPx2: dockVisible && hasUsableRect(gridRect)
-          ? getIntersectionAreaPx2(gridRect, dockRect)
+          ? getIntersectionAreaPx2(visibleGridRect, dockRect)
           : 0,
+        lastActionReachableByScroll,
+        scrollPositionRestored,
         viewport: { width: window.innerWidth, height: window.innerHeight },
         stageScrollTop: stage && Number.isFinite(stage.scrollTop) ? stage.scrollTop : null,
         gridColumns: getGridColumnCount(),
@@ -619,12 +836,20 @@ function getDevelopmentLayoutSnapshot(
       menuClearOfQrDock: overlap?.menuClearOfQrDock ?? false,
       footerOverlapAreaPx2: overlap?.footerOverlapAreaPx2 ?? 0,
       qrDockOverlapAreaPx2: overlap?.qrDockOverlapAreaPx2 ?? 0,
+      lastActionReachableByScroll: overlap?.lastActionReachableByScroll ?? null,
+      scrollPositionRestored: overlap?.scrollPositionRestored ?? false,
+      clippingKnown: geometry.clippingKnown,
     },
   };
 }
 
-function buildRequest(step: KioskStep, profile: AccessibilityProfile, backend: Backend) {
-  const geometry = readGeometry();
+function buildRequest(
+  step: KioskStep,
+  profile: AccessibilityProfile,
+  backend: Backend,
+  geometryOptions: { verifyLastActionReachability?: boolean } = {},
+) {
+  const geometry = readGeometry(geometryOptions);
   const grid = geometry.grid;
   const itemIds = grid
     ? Array.from(grid.querySelectorAll<HTMLElement>('[data-a11y-action-id]'), (element) =>
@@ -750,8 +975,13 @@ function isValidatedFakeEnvelope(value: unknown): value is {
     && operation.optionId === CIVIL_V2_SAFE_LIST_OPTION_ID;
 }
 
-function readContext(step: KioskStep, profile: AccessibilityProfile, backend: Backend): ContextSnapshot {
-  const built = buildRequest(step, profile, backend);
+function readContext(
+  step: KioskStep,
+  profile: AccessibilityProfile,
+  backend: Backend,
+  geometryOptions: { verifyLastActionReachability?: boolean } = {},
+): ContextSnapshot {
+  const built = buildRequest(step, profile, backend, geometryOptions);
   const snapshot: ContextSnapshot = {
     key: stableJson({
       backend,
@@ -1197,7 +1427,9 @@ export function useUniversalLayoutV2Fake({
     };
     const runPostApplySafetyCheck = () => {
       if (cancelled || generation.current !== appliedGeneration) return;
-      const latest = readContext(step, profile, backend);
+      const latest = readContext(step, profile, backend, {
+        verifyLastActionReachability: true,
+      });
       if (latest.key !== state.contextKey) {
         if (safetyDiagnosticRequestRef.current !== requestId) {
           safetyDiagnosticRequestRef.current = requestId;
@@ -1248,6 +1480,7 @@ export function useUniversalLayoutV2Fake({
               failureClass: latest.failureClass ?? 'APPLIED_PLAN_UNSAFE',
               profile,
               includeLayoutSnapshot: true,
+              overlapDiagnostic: latest.overlapDiagnostic,
             });
           }
         }
@@ -1268,6 +1501,7 @@ export function useUniversalLayoutV2Fake({
           safetyResult: 'pass',
           profile,
           includeLayoutSnapshot: true,
+          overlapDiagnostic: latest.overlapDiagnostic,
         });
       }
     };

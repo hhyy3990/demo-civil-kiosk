@@ -38,3 +38,9 @@ When `.stage` is the scroll viewport ending at the fixed QR dock, the full certi
 **Why:** In G-profile browser checks, the stage ended at the dock's top edge while the full one-column grid extended below it; scrolling exposed the last 50px+ action for hit-testing. The current whole-rectangle check still rejected the mobile-emulated case.
 
 **How to apply:** Distinguish actual visible overlap from off-viewport scroll content. Any safety-predicate change needs explicit approval and must retain final-action reachability and minimum-touch checks.
+
+In isolated headless Chromium, requesting a 1.185 page scale with mobile viewport emulation can still leave `visualViewport.scale` at 1.
+
+**Why:** A Civil zoom verification measured the requested emulation value rather than the browser's actual visual viewport and would have overstated coverage.
+
+**How to apply:** Assert the measured `visualViewport.scale`; report zoom as unverified unless it matches the requested scale.
