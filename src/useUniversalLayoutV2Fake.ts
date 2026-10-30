@@ -15,6 +15,7 @@ import {
   civilV2HostSafetyMessage,
   getCivilV2HostSafetyFailure,
   isCivilV2CentralAccessibilityAllowed,
+  type CivilV2HostSafetyFailure,
   type CivilV2HostEligibility,
 } from '../universal-layout/civil-layout-v2-host-safety';
 import type { UniversalLayoutV2Plan } from '../universal-layout/v2/universal-v2-contract-export';
@@ -23,6 +24,8 @@ import type { KioskStep } from './useKioskAccessibility';
 type FakeState = {
   plan: UniversalLayoutV2Plan | null;
   contextKey: string | null;
+  requestId: number | null;
+  startedAt: number | null;
   pending: boolean;
   message: string;
 };
@@ -37,9 +40,137 @@ type ContextSnapshot = {
   key: string;
   request: unknown;
   reason: string | null;
+  failureClass: ClientDiagnosticFailureClass | null;
 };
 
-const emptyState: FakeState = { plan: null, contextKey: null, pending: false, message: '' };
+type ClientDiagnosticStage =
+  | 'client_plan_received'
+  | 'client_validator_passed'
+  | 'client_validator_rejected'
+  | 'active_plan_set'
+  | 'layout_attribute_applied'
+  | 'post_apply_safety_passed'
+  | 'post_apply_safety_failed'
+  | 'active_plan_cleared';
+
+type ClientDiagnosticFailureClass =
+  | CivilV2HostSafetyFailure
+  | 'CENTRAL_TARGET_VIEWPORT'
+  | 'CENTRAL_PROFILE_NOT_ALLOWED'
+  | 'HTTP_RESPONSE_REJECTED'
+  | 'INVALID_PLAN_ENVELOPE'
+  | 'STALE_CONTEXT'
+  | 'REQUEST_GENERATION_CHANGED'
+  | 'REQUEST_FAILED'
+  | 'REQUEST_ABORTED'
+  | 'CONTEXT_CHANGED'
+  | 'MANUAL_PLAN_CLEAR'
+  | 'REQUEST_CANCELLED'
+  | 'REPLACED_BY_NEW_REQUEST'
+  | 'LAYOUT_ATTRIBUTE_NOT_APPLIED'
+  | 'APPLIED_PLAN_UNSAFE';
+
+type DiagnosticSafetyResult = 'not_checked' | 'pass' | 'fail';
+
+const CLIENT_DIAGNOSTIC_FAILURE_CLASSES = new Set<ClientDiagnosticFailureClass>([
+  'SCREEN_NOT_MAIN_MENU',
+  'VIEWPORT_NOT_ALLOWED',
+  'MENU_STRUCTURE_INVALID',
+  'GEOMETRY_UNAVAILABLE',
+  'FOOTER_NOT_SAFE',
+  'QR_DOCK_NOT_SAFE',
+  'MENU_CONTROLS_OVERLAP',
+  'TOUCH_TARGET_TOO_SMALL',
+  'MENU_HIT_TEST_FAILED',
+  'RESERVED_BOTTOM_CONTROLS_UNAVAILABLE',
+  'HOST_SAFETY_MEASUREMENT_INVALID',
+  'CENTRAL_TARGET_VIEWPORT',
+  'CENTRAL_PROFILE_NOT_ALLOWED',
+  'HTTP_RESPONSE_REJECTED',
+  'INVALID_PLAN_ENVELOPE',
+  'STALE_CONTEXT',
+  'REQUEST_GENERATION_CHANGED',
+  'REQUEST_FAILED',
+  'REQUEST_ABORTED',
+  'CONTEXT_CHANGED',
+  'MANUAL_PLAN_CLEAR',
+  'REQUEST_CANCELLED',
+  'REPLACED_BY_NEW_REQUEST',
+  'LAYOUT_ATTRIBUTE_NOT_APPLIED',
+  'APPLIED_PLAN_UNSAFE',
+]);
+
+const emptyState: FakeState = {
+  plan: null,
+  contextKey: null,
+  requestId: null,
+  startedAt: null,
+  pending: false,
+  message: '',
+};
+
+function getGridColumnCount(): number | null {
+  try {
+    const grid = document.querySelector<HTMLElement>('.certificate-grid');
+    if (!grid?.isConnected) return null;
+    const columns = window.getComputedStyle(grid).gridTemplateColumns.trim();
+    if (!columns || columns === 'none') return null;
+    const count = columns.split(/\s+/).length;
+    return Number.isSafeInteger(count) && count > 0 ? count : null;
+  } catch {
+    return null;
+  }
+}
+
+function getAllowedOptionId(value: unknown): typeof CIVIL_V2_SAFE_LIST_OPTION_ID | null {
+  if (typeof value !== 'object' || value === null) return null;
+  const envelope = value as Record<string, unknown>;
+  const plan = envelope.plan;
+  if (typeof plan !== 'object' || plan === null) return null;
+  const operations = (plan as Record<string, unknown>).operations;
+  if (!Array.isArray(operations) || operations.length !== 1) return null;
+  const operation = operations[0];
+  if (typeof operation !== 'object' || operation === null) return null;
+  const optionId = (operation as Record<string, unknown>).optionId;
+  return optionId === CIVIL_V2_SAFE_LIST_OPTION_ID ? optionId : null;
+}
+
+function getPlanOptionId(
+  plan: UniversalLayoutV2Plan | null,
+): typeof CIVIL_V2_SAFE_LIST_OPTION_ID | null {
+  return getAllowedOptionId({ plan });
+}
+
+function logClientDiagnostic({
+  stage,
+  requestId,
+  optionId,
+  startedAt,
+  safetyResult,
+  failureClass = null,
+}: {
+  stage: ClientDiagnosticStage;
+  requestId: number;
+  optionId: string | null;
+  startedAt: number;
+  safetyResult: DiagnosticSafetyResult;
+  failureClass?: ClientDiagnosticFailureClass | null;
+}): void {
+  if (!import.meta.env.DEV) return;
+  const safeOptionId = optionId === CIVIL_V2_SAFE_LIST_OPTION_ID ? optionId : null;
+  const safeFailureClass = failureClass && CLIENT_DIAGNOSTIC_FAILURE_CLASSES.has(failureClass)
+    ? failureClass
+    : null;
+  console.info('[civil-universal-layout-v2-client]', {
+    stage,
+    requestId,
+    optionId: safeOptionId,
+    gridColumns: getGridColumnCount(),
+    safetyResult,
+    failureClass: safeFailureClass,
+    elapsedMs: Math.max(0, Math.round(performance.now() - startedAt)),
+  });
+}
 
 function stableJson(value: unknown): string {
   if (Array.isArray(value)) return `[${value.map(stableJson).join(',')}]`;
@@ -296,6 +427,13 @@ function buildRequest(step: KioskStep, profile: AccessibilityProfile, backend: B
     : !eligibility.centralProfileAllowed
       ? '중앙 v2 시험은 기본 A 또는 승인된 G 접근성 조합에서만 허용됩니다.'
       : commonSafetyReason;
+  const failureClass: ClientDiagnosticFailureClass | null = !centralReason
+    ? null
+    : !eligibility.targetViewport
+      ? 'CENTRAL_TARGET_VIEWPORT'
+      : !eligibility.centralProfileAllowed
+        ? 'CENTRAL_PROFILE_NOT_ALLOWED'
+        : commonSafetyFailure;
   return {
     request: { request, eligibility },
     eligibility,
@@ -319,6 +457,7 @@ function buildRequest(step: KioskStep, profile: AccessibilityProfile, backend: B
       measurementsValid: geometry.measurementsValid,
     },
     reason: isCentralBackend(backend) ? centralReason : commonSafetyReason,
+    failureClass: isCentralBackend(backend) ? failureClass : commonSafetyFailure,
   };
 }
 
@@ -369,6 +508,7 @@ function readContext(step: KioskStep, profile: AccessibilityProfile, backend: Ba
     }),
     request: built.request,
     reason: built.reason,
+    failureClass: built.failureClass,
   };
 }
 
