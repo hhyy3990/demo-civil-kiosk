@@ -15,6 +15,12 @@ Treat a valid plan and matching hashes as necessary, not sufficient: after React
 
 **How to apply:** Keep this post-apply physical check in both local Fake and central-plan application paths; do not widen profile eligibility based on contract validation alone.
 
+In an isolated 1080×1920 G-profile run, the first DOM mutation after selecting `reserved-safe-list` still intersected the QR dock and left the last items out of the hit-testable viewport. After the existing two-animation-frame remeasurement, the layout settled: all 18 actions were hit-testable, the minimum button height was 50.6px, and the menu no longer intersected the dock.
+
+**Why:** The first render is transient while the accessibility layout reflows; treating that geometry as final would incorrectly roll back a layout that becomes safe.
+
+**How to apply:** Preserve the post-apply settling and remeasurement. Close the QR success notice before testing hit targets, and do not use the immediate attribute-mutation frame as the final safety result.
+
 During Development testing, an expanded Universal v2 control panel can consume space in the main-menu flow and create apparent menu/dock overlap even when the customer-facing layout is safe.
 
 **Why:** The panel's expanded height shifted the Civil G menu down by the same amount that distinguished a failing run from the earlier safe measurement.
