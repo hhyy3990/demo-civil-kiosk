@@ -27,6 +27,10 @@ import { useUniversalLayoutV2Fake } from './useUniversalLayoutV2Fake';
 import { useKioskAccessibility, type KioskStep } from './useKioskAccessibility';
 import { isCivilGQrProfile, selectCivilQrAutoV2Backend } from '../universal-layout/civil-qr-auto-v2';
 import {
+  formatCivilQrApplyIdempotencyKey,
+  shouldStartCivilProductionQrPlan,
+} from '../universal-layout/civil-qr-apply-event';
+import {
   CIVIL_V2_ITEM_IDS,
   CIVIL_V2_SAFE_LIST_OPTION_ID,
 } from '../universal-layout/civil-layout-v2-fake-constants';
@@ -95,6 +99,7 @@ function App() {
   const [qrAppliedEvent, setQrAppliedEvent] = useState<{
     id: number;
     profile: AccessibilityProfile;
+    productionIdempotencyKey: string | null;
   } | null>(null);
   const [productionAutoQrEventId, setProductionAutoQrEventId] = useState<number | null>(null);
   const productionStatusRequestedRef = useRef<number | null>(null);
@@ -295,10 +300,14 @@ function App() {
   const applyQrAccessibilityProfile = useCallback((profile: AccessibilityProfile) => {
     applyAccessibilityProfile(profile);
     qrAppliedEventCounterRef.current += 1;
+    const eventId = import.meta.env.PROD ? globalThis.crypto?.randomUUID?.() : undefined;
     setProductionAutoQrEventId(null);
     setQrAppliedEvent({
       id: qrAppliedEventCounterRef.current,
       profile,
+      productionIdempotencyKey: eventId
+        ? formatCivilQrApplyIdempotencyKey(eventId)
+        : null,
     });
   }, [applyAccessibilityProfile]);
   const startDevAccessibilityExperience = useCallback(() => {
@@ -331,6 +340,10 @@ function App() {
     if (!import.meta.env.PROD || qrAppliedEvent === null) return;
     if (productionStatusRequestedRef.current === qrAppliedEvent.id) return;
     if (notice || step !== 'main-menu' || accessibilityProfile !== qrAppliedEvent.profile) return;
+    if (!qrAppliedEvent.productionIdempotencyKey) {
+      productionStatusRequestedRef.current = qrAppliedEvent.id;
+      return;
+    }
     if (
       !isCivilGQrProfile(accessibilityProfile)
       || window.innerWidth !== 1080
@@ -374,7 +387,9 @@ function App() {
       }
       return;
     }
-    if (lastAutoQrEventRef.current === qrAppliedEvent.id) return;
+    if (import.meta.env.PROD) {
+      if (!shouldStartCivilProductionQrPlan(qrAppliedEvent, lastAutoQrEventRef.current)) return;
+    } else if (lastAutoQrEventRef.current === qrAppliedEvent.id) return;
     if (scheduledAutoQrEventRef.current !== null) {
       for (const frame of autoQrAnimationFramesRef.current) window.cancelAnimationFrame(frame);
       scheduledAutoQrEventRef.current = null;
@@ -437,7 +452,11 @@ function App() {
           return;
         }
         lastAutoQrEventRef.current = qrAppliedEvent.id;
-        void autoQrV2ApplyRef.current(CIVIL_V2_SAFE_LIST_OPTION_ID, 'qr-auto');
+        void autoQrV2ApplyRef.current(
+          CIVIL_V2_SAFE_LIST_OPTION_ID,
+          'qr-auto',
+          qrAppliedEvent.productionIdempotencyKey ?? undefined,
+        );
       });
     });
   }, [accessibilityProfile, autoQrV2Backend, notice, productionAutoQrEventId, qrAppliedEvent, step]);

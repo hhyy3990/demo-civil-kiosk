@@ -19,6 +19,7 @@ import {
   CIVIL_V2_PRODUCTION_SCREEN_ID,
   CIVIL_V2_PRODUCTION_STRUCTURE_VERSION,
 } from './civil-layout-v2-production-constants.js';
+import { isCivilQrApplyIdempotencyKey } from './civil-qr-apply-event.js';
 import {
   civilV2HostEligibilitySchema,
   getCivilV2HostSafetyFailure,
@@ -30,8 +31,7 @@ export const CIVIL_V2_PRODUCTION_STATUS_PATH = '/api/production/universal-layout
 const maxBodyBytes = 12_288;
 const maxResponseBytes = 16_384;
 const requestTimeoutMs = 12_000;
-const maxProviderAttemptsPerProcess = 30;
-const idempotencyTtlMs = 30 * 60_000;
+const maxProviderAttemptsPerProcess = 50;
 const sessionCookieName = 'civil_v2_ai_session';
 
 const productionEnvelopeSchema = z.object({
@@ -78,7 +78,6 @@ export type CivilProductionRelayConfig = {
 
 type StoredResult = {
   fingerprint: string;
-  expiresAt: number;
   result: CivilProductionRelayResult;
 };
 
@@ -220,9 +219,8 @@ function getOrCreateSession(
   return sessionId;
 }
 
-function parseIdempotencyKey(value: string | undefined): string | null {
-  if (!value || value.length < 16 || value.length > 128 || !/^[A-Za-z0-9._:-]+$/.test(value)) return null;
-  return value;
+export function parseCivilProductionIdempotencyKey(value: string | undefined): string | null {
+  return isCivilQrApplyIdempotencyKey(value) ? value : null;
 }
 
 async function readLimitedJson(response: Response): Promise<unknown> {
@@ -279,7 +277,6 @@ export function createCivilProductionV2Forwarder(
 ) {
   const idempotency = new Map<string, StoredResult>();
   const inFlight = new Map<string, { fingerprint: string; promise: Promise<CivilProductionRelayResult> }>();
-  const sessionAttempts = new Set<string>();
   let upstreamAttempts = 0;
 
   const diagnostic = (stage: string, fields: Record<string, string | number | boolean> = {}) => {
@@ -304,29 +301,22 @@ export function createCivilProductionV2Forwarder(
     }
     const model = built.model;
     const fingerprint = canonicalUniversalJson(model);
-    const currentTime = Date.now();
-    for (const [key, entry] of idempotency) {
-      if (entry.expiresAt <= currentTime) idempotency.delete(key);
-    }
+    const scopedEventKey = `${sessionId}:${idempotencyKey}`;
 
-    const prior = idempotency.get(idempotencyKey);
+    const prior = idempotency.get(scopedEventKey);
     if (prior) {
       if (prior.fingerprint !== fingerprint) return { status: 409, body: { error: 'IDEMPOTENCY_KEY_REUSED' } };
       return prior.result;
     }
-    const pending = inFlight.get(idempotencyKey);
+    const pending = inFlight.get(scopedEventKey);
     if (pending) {
       if (pending.fingerprint !== fingerprint) return { status: 409, body: { error: 'IDEMPOTENCY_KEY_REUSED' } };
       return pending.promise;
-    }
-    if (sessionAttempts.has(sessionId)) {
-      return { status: 429, body: { error: 'SESSION_AI_LIMIT_REACHED' } };
     }
     if (upstreamAttempts >= maxProviderAttemptsPerProcess) {
       return { status: 429, body: { error: 'HOST_PROVIDER_LIMIT_REACHED' } };
     }
 
-    sessionAttempts.add(sessionId);
     upstreamAttempts += 1;
     const promise = (async (): Promise<CivilProductionRelayResult> => {
       const controller = new AbortController();
@@ -366,9 +356,8 @@ export function createCivilProductionV2Forwarder(
             body: { error: code ?? (status === 429 ? 'CENTRAL_RATE_LIMITED' : 'CENTRAL_PLAN_REJECTED') },
           };
           diagnostic('upstream-rejected', { status: upstream.status, errorCode: code ?? 'UNCLASSIFIED' });
-          idempotency.set(idempotencyKey, {
+          idempotency.set(scopedEventKey, {
             fingerprint,
-            expiresAt: Date.now() + idempotencyTtlMs,
             result,
           });
           return result;
@@ -400,9 +389,8 @@ export function createCivilProductionV2Forwarder(
           status: 200,
           body: { accepted: true, model, plan },
         };
-        idempotency.set(idempotencyKey, {
+        idempotency.set(scopedEventKey, {
           fingerprint,
-          expiresAt: Date.now() + idempotencyTtlMs,
           result,
         });
         diagnostic('plan-validated', { optionId: CIVIL_V2_PRODUCTION_OPTION_ID });
@@ -414,9 +402,8 @@ export function createCivilProductionV2Forwarder(
             ? 'INVALID_CENTRAL_PLAN'
             : 'CENTRAL_PLAN_FAILED';
         const result = { status: timeout ? 504 : 502, body: { error: code } };
-        idempotency.set(idempotencyKey, {
+        idempotency.set(scopedEventKey, {
           fingerprint,
-          expiresAt: Date.now() + idempotencyTtlMs,
           result,
         });
         diagnostic('upstream-failed', { errorCode: code, timeout });
@@ -425,11 +412,11 @@ export function createCivilProductionV2Forwarder(
         clearTimeout(timeout);
       }
     })();
-    inFlight.set(idempotencyKey, { fingerprint, promise });
+    inFlight.set(scopedEventKey, { fingerprint, promise });
     try {
       return await promise;
     } finally {
-      if (inFlight.get(idempotencyKey)?.promise === promise) inFlight.delete(idempotencyKey);
+      if (inFlight.get(scopedEventKey)?.promise === promise) inFlight.delete(scopedEventKey);
     }
   };
 }
@@ -475,10 +462,10 @@ export function createCivilProductionV2Middleware(config: CivilProductionRelayCo
     const sessionId = verifySessionCookie(cookieValue(request), config.sessionSecret);
     if (!sessionId) return jsonResponse(response, 401, { error: 'PRODUCTION_SESSION_REQUIRED' });
     const idempotencyHeader = request.headers['idempotency-key'];
-    const idempotencyKey = parseIdempotencyKey(
+    const idempotencyKey = parseCivilProductionIdempotencyKey(
       Array.isArray(idempotencyHeader) ? idempotencyHeader[0] : idempotencyHeader,
     );
-    if (!idempotencyKey) return jsonResponse(response, 400, { error: 'IDEMPOTENCY_KEY_REQUIRED' });
+    if (!idempotencyKey) return jsonResponse(response, 400, { error: 'IDEMPOTENCY_KEY_INVALID' });
 
     let input: unknown;
     try {

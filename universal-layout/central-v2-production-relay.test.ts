@@ -10,7 +10,15 @@ import {
   CIVIL_V2_PRODUCTION_STRUCTURE_VERSION,
   createCivilProductionV2Model,
 } from './civil-layout-v2-production.js';
-import { createCivilProductionV2Forwarder } from './central-v2-production-relay.js';
+import {
+  createCivilProductionV2Forwarder,
+  parseCivilProductionIdempotencyKey,
+} from './central-v2-production-relay.js';
+import {
+  claimQrProfileResolveAttempt,
+  formatCivilQrApplyIdempotencyKey,
+  shouldStartCivilProductionQrPlan,
+} from './civil-qr-apply-event.js';
 
 const input = {
   request: {
@@ -54,6 +62,13 @@ const input = {
   },
 };
 
+function eventKey(sequence: number): string {
+  const eventId = `00000000-0000-4000-8000-${String(sequence).padStart(12, '0')}`;
+  const key = formatCivilQrApplyIdempotencyKey(eventId);
+  assert.ok(key);
+  return key;
+}
+
 function makePlan(model: ReturnType<typeof createCivilProductionV2Model>) {
   return {
     schemaVersion: model.schemaVersion,
@@ -94,7 +109,7 @@ test('Production relay sends only strict model with host auth and idempotency; a
     assert.equal(url.pathname, '/api/production/universal-layout/v2/openai-plan');
     assert.equal(init?.method, 'POST');
     assert.equal(new Headers(init?.headers).get('X-Host-AI-Token'), 'not-a-real-host-token');
-    assert.equal(new Headers(init?.headers).get('Idempotency-Key'), 'civil-test-key-000001');
+    assert.equal(new Headers(init?.headers).get('Idempotency-Key'), eventKey(1));
     const body = JSON.parse(String(init?.body));
     assert.deepEqual(Object.keys(body), ['model']);
     const model = body.model as ReturnType<typeof createCivilProductionV2Model>;
@@ -104,8 +119,8 @@ test('Production relay sends only strict model with host auth and idempotency; a
     });
   };
   const forward = createCivilProductionV2Forwarder(readyConfig(fetcher));
-  const first = await forward(input, 'civil-test-key-000001', 'session-1');
-  const duplicate = await forward(input, 'civil-test-key-000001', 'session-1');
+  const first = await forward(input, eventKey(1), 'session-1');
+  const duplicate = await forward(input, eventKey(1), 'session-1');
   assert.equal(first.status, 200);
   assert.equal((first.body.plan as { operations: { optionId: string }[] }).operations[0]?.optionId, 'reserved-safe-list');
   assert.equal(duplicate.status, 200);
@@ -128,7 +143,7 @@ test('Production relay stays blocked before fetch unless all independent gates a
     { centralProductionUrl: 'https://central-production.example/api/path' },
   ]) {
     const forward = createCivilProductionV2Forwarder(readyConfig(fetcher, overrides));
-    const result = await forward(input, 'civil-test-key-000002', `session-${calls}-${Object.keys(overrides)[0]}`);
+    const result = await forward(input, eventKey(2), `session-${calls}-${Object.keys(overrides)[0]}`);
     assert.notEqual(result.status, 200);
   }
   assert.equal(calls, 0);
@@ -144,15 +159,15 @@ test('Production relay fails closed on invalid plan and does not retry the provi
     });
   };
   const forward = createCivilProductionV2Forwarder(readyConfig(fetcher));
-  const first = await forward(input, 'civil-test-key-000003', 'session-3');
-  const duplicate = await forward(input, 'civil-test-key-000003', 'session-3');
+  const first = await forward(input, eventKey(3), 'session-3');
+  const duplicate = await forward(input, eventKey(3), 'session-3');
   assert.equal(first.status, 502);
   assert.equal((first.body as { error: string }).error, 'INVALID_CENTRAL_PLAN');
   assert.deepEqual(duplicate, first);
   assert.equal(calls, 1);
 });
 
-test('Production relay rejects repeat AI attempts from one signed session with a new idempotency key', async () => {
+test('same event is deduplicated while a new QR event in the same session gets a new AI attempt', async () => {
   let calls = 0;
   const fetcher: typeof fetch = async (url, init) => {
     calls += 1;
@@ -163,10 +178,35 @@ test('Production relay rejects repeat AI attempts from one signed session with a
     });
   };
   const forward = createCivilProductionV2Forwarder(readyConfig(fetcher));
-  assert.equal((await forward(input, 'civil-test-key-000004', 'session-4')).status, 200);
-  const blocked = await forward(input, 'civil-test-key-000005', 'session-4');
-  assert.equal(blocked.status, 429);
-  assert.equal((blocked.body as { error: string }).error, 'SESSION_AI_LIMIT_REACHED');
+  const firstKey = eventKey(4);
+  const first = await forward(input, firstKey, 'session-4');
+  const sameEventDuplicate = await forward(input, firstKey, 'session-4');
+  const newEvent = await forward(input, eventKey(5), 'session-4');
+  assert.equal(first.status, 200);
+  assert.deepEqual(sameEventDuplicate, first);
+  assert.equal(newEvent.status, 200);
+  assert.equal(calls, 2);
+});
+
+test('concurrent duplicate requests for one QR event share a single upstream attempt', async () => {
+  let calls = 0;
+  const fetcher: typeof fetch = async (_url, init) => {
+    calls += 1;
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    const model = JSON.parse(String(init?.body)).model as ReturnType<typeof createCivilProductionV2Model>;
+    return new Response(JSON.stringify(makePlan(model)), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  };
+  const forward = createCivilProductionV2Forwarder(readyConfig(fetcher));
+  const key = eventKey(56);
+  const [first, duplicate] = await Promise.all([
+    forward(input, key, 'session-concurrent'),
+    forward(input, key, 'session-concurrent'),
+  ]);
+  assert.equal(first.status, 200);
+  assert.deepEqual(duplicate, first);
   assert.equal(calls, 1);
 });
 
@@ -185,7 +225,7 @@ test('Production relay maps authentication and allowlist errors safely without r
         });
       };
       const forward = createCivilProductionV2Forwarder(readyConfig(fetcher));
-      const result = await forward(input, `civil-test-key-${status}0000`, `session-${status}`);
+      const result = await forward(input, eventKey(status), `session-${status}`);
       assert.equal(result.status, expectedStatus);
       assert.equal((result.body as { error: string }).error, code);
       assert.equal(calls, 1);
@@ -208,9 +248,66 @@ test('Production relay times out once, sanitizes the failure, and does not retry
   const forward = createCivilProductionV2Forwarder(
     readyConfig(fetcher, { requestTimeoutMs: 1 }),
   );
-  const result = await forward(input, 'civil-test-key-timeout', 'session-timeout');
+  const result = await forward(input, eventKey(50), 'session-timeout');
   assert.equal(result.status, 504);
   assert.equal((result.body as { error: string }).error, 'CENTRAL_REQUEST_TIMEOUT');
   assert.equal(calls, 1);
   assert.equal(JSON.stringify(result).includes('private request detail'), false);
+});
+
+test('Production idempotency keys are strict UUIDv4 QR-event IDs and exclude other payload data', () => {
+  const valid = eventKey(51);
+  assert.equal(parseCivilProductionIdempotencyKey(valid), valid);
+  assert.equal(parseCivilProductionIdempotencyKey(undefined), null);
+  assert.equal(parseCivilProductionIdempotencyKey(''), null);
+  assert.equal(parseCivilProductionIdempotencyKey(valid.replace('civil-qr-apply:', 'session-token:')), null);
+  assert.equal(parseCivilProductionIdempotencyKey(`${valid}:qr-token`), null);
+  assert.equal(
+    parseCivilProductionIdempotencyKey('civil-qr-apply:00000000-0000-1000-8000-000000000001'),
+    null,
+  );
+  assert.equal(formatCivilQrApplyIdempotencyKey('not-a-uuid'), null);
+});
+
+test('a page refresh has no persisted QR event; only a new explicit apply can start another plan', () => {
+  const firstEvent = {
+    id: 1,
+    profile: input.qrProfile,
+    productionIdempotencyKey: eventKey(52),
+  };
+  assert.equal(shouldStartCivilProductionQrPlan(null, null), false);
+  assert.equal(shouldStartCivilProductionQrPlan(firstEvent, null), true);
+  assert.equal(shouldStartCivilProductionQrPlan(firstEvent, firstEvent.id), false);
+  const nextEvent = {
+    id: 2,
+    profile: input.qrProfile,
+    productionIdempotencyKey: eventKey(53),
+  };
+  assert.equal(shouldStartCivilProductionQrPlan(nextEvent, firstEvent.id), true);
+});
+
+test('the same event key in a different session remains a separate user attempt', async () => {
+  let calls = 0;
+  const fetcher: typeof fetch = async (_url, init) => {
+    calls += 1;
+    const model = JSON.parse(String(init?.body)).model as ReturnType<typeof createCivilProductionV2Model>;
+    return new Response(JSON.stringify(makePlan(model)), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  };
+  const forward = createCivilProductionV2Forwarder(readyConfig(fetcher));
+  const userOne = await forward(input, eventKey(54), 'session-user-one');
+  const userTwo = await forward(input, eventKey(55), 'session-user-two');
+  assert.equal(userOne.status, 200);
+  assert.equal(userTwo.status, 200);
+  assert.equal(calls, 2);
+});
+
+test('one QR resolver event cannot be claimed twice by repeated scanner callbacks', () => {
+  const loadingState = { current: false };
+  assert.equal(claimQrProfileResolveAttempt(loadingState), true);
+  assert.equal(claimQrProfileResolveAttempt(loadingState), false);
+  loadingState.current = false;
+  assert.equal(claimQrProfileResolveAttempt(loadingState), true);
 });

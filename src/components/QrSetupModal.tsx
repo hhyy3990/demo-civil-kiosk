@@ -6,6 +6,7 @@ import {
   type AccessibilityProfile,
   validateAccessibilityProfile,
 } from '@naebangsik/kiosk-accessibility-sdk';
+import { claimQrProfileResolveAttempt } from '../../universal-layout/civil-qr-apply-event';
 import './qr-setup-modal.css';
 
 type ScannerHandle = {
@@ -132,8 +133,8 @@ export function QrSetupModal({
   }, []);
 
   async function resolveProfile(value: string, inputKind: 'scan' | 'manual') {
+    if (!claimQrProfileResolveAttempt(loadingRef)) return;
     setError('');
-    loadingRef.current = true;
     setLoading(true);
     const isCurrentSession = createSessionGuard();
     try {

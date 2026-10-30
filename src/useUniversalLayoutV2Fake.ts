@@ -17,6 +17,7 @@ import {
   CIVIL_V2_PRODUCTION_SCREEN_ID,
   CIVIL_V2_PRODUCTION_STRUCTURE_VERSION,
 } from '../universal-layout/civil-layout-v2-production-constants';
+import { isCivilQrApplyIdempotencyKey } from '../universal-layout/civil-qr-apply-event';
 import {
   civilV2HostSafetyMessage,
   getCivilV2HostSafetyFailure,
@@ -1078,11 +1079,21 @@ export function useUniversalLayoutV2Fake({
   const apply = useCallback(async (
     optionId: typeof CIVIL_V2_SAFE_LIST_OPTION_ID | null,
     requestSource: 'manual' | 'qr-auto' = 'manual',
+    productionIdempotencyKey?: string,
   ) => {
     if (import.meta.env.PROD && backend !== 'production-openai') return;
     if (!enabled || step !== 'main-menu' || pendingRef.current) return;
     if (optionId === null) {
       cancel('', 'MANUAL_PLAN_CLEAR');
+      return;
+    }
+    if (backend === 'production-openai' && !isCivilQrApplyIdempotencyKey(productionIdempotencyKey)) {
+      const nextState = {
+        ...emptyState,
+        message: 'QR 적용 이벤트를 확인하지 못해 레이아웃 최적화를 시작하지 않았습니다.',
+      };
+      stateRef.current = nextState;
+      setState(nextState);
       return;
     }
 
@@ -1159,8 +1170,7 @@ export function useUniversalLayoutV2Fake({
       };
       let requestBody: unknown = context.request;
       if (backend === 'production-openai') {
-        if (!globalThis.crypto?.randomUUID) throw new Error('IDEMPOTENCY_KEY_UNAVAILABLE');
-        headers['Idempotency-Key'] = globalThis.crypto.randomUUID();
+        headers['Idempotency-Key'] = productionIdempotencyKey!;
         requestBody = {
           ...(context.request as Record<string, unknown>),
           qrProfile: {
