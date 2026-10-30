@@ -32,3 +32,9 @@ Do not run the menu hit-test while the existing QR-success confirmation overlay 
 **Why:** The overlay intentionally covers every menu action; the fail-closed hit-test correctly rejected the layout even though the menu, footer, and QR dock geometry was otherwise safe.
 
 **How to apply:** For QR-triggered Development layout requests, defer planning until the host confirmation notice is dismissed. Do not bypass hit-testing or make the overlay click-through.
+
+When `.stage` is the scroll viewport ending at the fixed QR dock, the full certificate-grid rectangle can extend behind the dock even though `.stage` clips that content and later actions are reachable by scrolling. A raw grid-to-dock intersection is not, by itself, proof that visible menu content covers the dock.
+
+**Why:** In G-profile browser checks, the stage ended at the dock's top edge while the full one-column grid extended below it; scrolling exposed the last 50px+ action for hit-testing. The current whole-rectangle check still rejected the mobile-emulated case.
+
+**How to apply:** Distinguish actual visible overlap from off-viewport scroll content. Any safety-predicate change needs explicit approval and must retain final-action reachability and minimum-touch checks.

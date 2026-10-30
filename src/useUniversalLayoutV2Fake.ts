@@ -1168,20 +1168,169 @@ export function useUniversalLayoutV2Fake({
 
     let firstFrame = 0;
     let secondFrame = 0;
-    firstFrame = window.requestAnimationFrame(() => {
-      if (generation.current === appliedGeneration) {
+    let stabilityFrame = 0;
+    let cancelled = false;
+    const readLayoutStabilitySignature = () => {
+      const stage = document.querySelector<HTMLElement>('.stage');
+      const grid = document.querySelector<HTMLElement>('.certificate-grid');
+      const footer = document.querySelector<HTMLElement>('.device-footer');
+      const qrDock = document.querySelector<HTMLElement>('.a11y-qr-entry-dock');
+      const rect = (element: HTMLElement | null) => {
+        if (!element) return null;
+        const value = element.getBoundingClientRect();
+        return [value.x, value.y, value.width, value.height]
+          .map((part) => Math.round(part * 2) / 2);
+      };
+      return JSON.stringify({
+        stage: rect(stage),
+        stageScrollTop: stage ? Math.round(stage.scrollTop * 2) / 2 : null,
+        stageScrollSize: stage ? [stage.clientHeight, stage.scrollHeight] : null,
+        grid: rect(grid),
+        gridColumns: grid ? getComputedStyle(grid).gridTemplateColumns : null,
+        gridGap: grid ? getComputedStyle(grid).gap : null,
+        actions: grid
+          ? Array.from(grid.querySelectorAll<HTMLElement>('.category-button'), rect)
+          : [],
+        footer: rect(footer),
+        qrDock: rect(qrDock),
+      });
+    };
+    const runPostApplySafetyCheck = () => {
+      if (cancelled || generation.current !== appliedGeneration) return;
+      const latest = readContext(step, profile, backend);
+      if (latest.key !== state.contextKey) {
+        if (safetyDiagnosticRequestRef.current !== requestId) {
+          safetyDiagnosticRequestRef.current = requestId;
+          import.meta.env.DEV && logClientDiagnostic({
+            stage: 'post_apply_safety_failed',
+            requestId,
+            optionId,
+            startedAt,
+            safetyResult: 'fail',
+            failureClass: 'STALE_CONTEXT',
+          });
+        }
+        clearAppliedPlan(
+          latest.key,
+          '화면 구조가 바뀌어 계획을 폐기했습니다. 접근성 설정은 유지됩니다.',
+          'STALE_CONTEXT',
+        );
+        return;
+      }
+      if (latest.reason) {
+        if (safetyDiagnosticRequestRef.current !== requestId) {
+          safetyDiagnosticRequestRef.current = requestId;
+          if (
+            latest.failureClass === 'MENU_CONTROLS_OVERLAP'
+            && import.meta.env.DEV
+            && latest.overlapDiagnostic
+          ) {
+            const safeOptionId = optionId === CIVIL_V2_SAFE_LIST_OPTION_ID ? optionId : null;
+            console.info('[civil-universal-layout-v2-client]', JSON.stringify({
+              stage: 'post_apply_safety_failed',
+              requestId,
+              optionId: safeOptionId,
+              gridColumns: latest.overlapDiagnostic.gridColumns,
+              safetyResult: 'fail',
+              failureClass: 'MENU_CONTROLS_OVERLAP',
+              elapsedMs: Math.max(0, Math.round(performance.now() - startedAt)),
+              overlapDiagnostic: latest.overlapDiagnostic,
+              layoutSnapshot: getDevelopmentLayoutSnapshot(profile),
+              rollback: true,
+            }));
+          } else {
+            import.meta.env.DEV && logClientDiagnostic({
+              stage: 'post_apply_safety_failed',
+              requestId,
+              optionId,
+              startedAt,
+              safetyResult: 'fail',
+              failureClass: latest.failureClass ?? 'APPLIED_PLAN_UNSAFE',
+              profile,
+              includeLayoutSnapshot: true,
+            });
+          }
+        }
+        clearAppliedPlan(
+          latest.key,
+          `적용 후 화면 안전 검사를 통과하지 못해 배치 계획만 해제했습니다. 접근성 설정은 유지됩니다. ${latest.reason}`,
+          latest.failureClass ?? 'APPLIED_PLAN_UNSAFE',
+        );
+        return;
+      }
+      if (safetyDiagnosticRequestRef.current !== requestId) {
+        safetyDiagnosticRequestRef.current = requestId;
         import.meta.env.DEV && logClientDiagnostic({
-          stage: 'first_animation_frame',
+          stage: 'post_apply_safety_passed',
           requestId,
           optionId,
           startedAt,
-          safetyResult: 'not_checked',
+          safetyResult: 'pass',
           profile,
           includeLayoutSnapshot: true,
         });
       }
+    };
+    const waitForStableLayout = () => {
+      const settleStartedAt = performance.now();
+      const minStableMs = 260;
+      const maxWaitMs = 1_200;
+      let previousSignature: string | null = null;
+      let consecutiveStableSamples = 0;
+      const sample = () => {
+        if (cancelled || generation.current !== appliedGeneration) return;
+        const signature = readLayoutStabilitySignature();
+        if (signature === previousSignature) consecutiveStableSamples += 1;
+        else consecutiveStableSamples = 0;
+        previousSignature = signature;
+        const elapsedMs = performance.now() - settleStartedAt;
+        if (elapsedMs >= minStableMs && consecutiveStableSamples >= 2) {
+          runPostApplySafetyCheck();
+          return;
+        }
+        if (elapsedMs >= maxWaitMs) {
+          const latest = readContext(step, profile, backend);
+          const contextChanged = latest.key !== state.contextKey;
+          const failureClass = contextChanged ? 'STALE_CONTEXT' : 'APPLIED_PLAN_UNSAFE';
+          if (safetyDiagnosticRequestRef.current !== requestId) {
+            safetyDiagnosticRequestRef.current = requestId;
+            import.meta.env.DEV && logClientDiagnostic({
+              stage: 'post_apply_safety_failed',
+              requestId,
+              optionId,
+              startedAt,
+              safetyResult: contextChanged ? 'not_checked' : 'fail',
+              failureClass,
+              profile,
+              includeLayoutSnapshot: true,
+            });
+          }
+          clearAppliedPlan(
+            latest.key,
+            contextChanged
+              ? '화면 구조가 바뀌어 계획을 폐기했습니다. 접근성 설정은 유지됩니다.'
+              : '화면 배치가 안정되지 않아 계획만 해제했습니다. 접근성 설정은 유지됩니다.',
+            failureClass,
+          );
+          return;
+        }
+        stabilityFrame = window.requestAnimationFrame(sample);
+      };
+      stabilityFrame = window.requestAnimationFrame(sample);
+    };
+    firstFrame = window.requestAnimationFrame(() => {
+      if (cancelled || generation.current !== appliedGeneration) return;
+      import.meta.env.DEV && logClientDiagnostic({
+        stage: 'first_animation_frame',
+        requestId,
+        optionId,
+        startedAt,
+        safetyResult: 'not_checked',
+        profile,
+        includeLayoutSnapshot: true,
+      });
       secondFrame = window.requestAnimationFrame(() => {
-        if (generation.current !== appliedGeneration) return;
+        if (cancelled || generation.current !== appliedGeneration) return;
         import.meta.env.DEV && logClientDiagnostic({
           stage: 'second_animation_frame',
           requestId,
@@ -1191,84 +1340,14 @@ export function useUniversalLayoutV2Fake({
           profile,
           includeLayoutSnapshot: true,
         });
-        const latest = readContext(step, profile, backend);
-        if (latest.key !== state.contextKey) {
-          if (safetyDiagnosticRequestRef.current !== requestId) {
-            safetyDiagnosticRequestRef.current = requestId;
-            import.meta.env.DEV && logClientDiagnostic({
-              stage: 'post_apply_safety_failed',
-              requestId,
-              optionId,
-              startedAt,
-              safetyResult: 'fail',
-              failureClass: 'STALE_CONTEXT',
-            });
-          }
-          clearAppliedPlan(
-            latest.key,
-            '화면 구조가 바뀌어 계획을 폐기했습니다. 접근성 설정은 유지됩니다.',
-            'STALE_CONTEXT',
-          );
-          return;
-        }
-        if (latest.reason) {
-          if (safetyDiagnosticRequestRef.current !== requestId) {
-            safetyDiagnosticRequestRef.current = requestId;
-            if (
-              latest.failureClass === 'MENU_CONTROLS_OVERLAP'
-              && import.meta.env.DEV
-              && latest.overlapDiagnostic
-            ) {
-              const safeOptionId = optionId === CIVIL_V2_SAFE_LIST_OPTION_ID ? optionId : null;
-              console.info('[civil-universal-layout-v2-client]', JSON.stringify({
-                stage: 'post_apply_safety_failed',
-                requestId,
-                optionId: safeOptionId,
-                gridColumns: latest.overlapDiagnostic.gridColumns,
-                safetyResult: 'fail',
-                failureClass: 'MENU_CONTROLS_OVERLAP',
-                elapsedMs: Math.max(0, Math.round(performance.now() - startedAt)),
-                overlapDiagnostic: latest.overlapDiagnostic,
-                layoutSnapshot: getDevelopmentLayoutSnapshot(profile),
-                rollback: true,
-              }));
-            } else {
-              import.meta.env.DEV && logClientDiagnostic({
-                stage: 'post_apply_safety_failed',
-                requestId,
-                optionId,
-                startedAt,
-                safetyResult: 'fail',
-                failureClass: latest.failureClass ?? 'APPLIED_PLAN_UNSAFE',
-                profile,
-                includeLayoutSnapshot: true,
-              });
-            }
-          }
-          clearAppliedPlan(
-            latest.key,
-            `적용 후 화면 안전 검사를 통과하지 못해 배치 계획만 해제했습니다. 접근성 설정은 유지됩니다. ${latest.reason}`,
-            latest.failureClass ?? 'APPLIED_PLAN_UNSAFE',
-          );
-          return;
-        }
-        if (safetyDiagnosticRequestRef.current !== requestId) {
-          safetyDiagnosticRequestRef.current = requestId;
-          import.meta.env.DEV && logClientDiagnostic({
-            stage: 'post_apply_safety_passed',
-            requestId,
-            optionId,
-            startedAt,
-            safetyResult: 'pass',
-            profile,
-            includeLayoutSnapshot: true,
-          });
-        }
+        waitForStableLayout();
       });
     });
     return () => {
+      cancelled = true;
       window.cancelAnimationFrame(firstFrame);
       window.cancelAnimationFrame(secondFrame);
+      window.cancelAnimationFrame(stabilityFrame);
     };
   }, [
     backend,
