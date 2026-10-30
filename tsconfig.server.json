@@ -1,0 +1,28 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "rootDir": ".",
+    "outDir": "dist-server",
+    "types": ["node"],
+    "skipLibCheck": true,
+    "strict": true,
+    "esModuleInterop": true,
+    "noEmitOnError": true,
+    "forceConsistentCasingInFileNames": true
+  },
+  "include": [
+    "server/production-server.ts",
+    "src/server/qr-profile-relay.ts",
+    "universal-layout/central-v2-production-relay.ts",
+    "universal-layout/civil-layout-v2-production.ts",
+    "universal-layout/civil-layout-v2-production-constants.ts",
+    "universal-layout/civil-layout-v2-host-safety.ts",
+    "universal-layout/civil-layout-v2-fake-constants.ts",
+    "universal-layout/v2/server/universal-layout-contract-v2.ts",
+    "universal-layout/v2/server/universal-layout-contract.ts",
+    "universal-layout/v2/universal-v2-contract-export.ts"
+  ]
+}

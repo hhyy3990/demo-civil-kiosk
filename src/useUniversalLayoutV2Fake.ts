@@ -12,6 +12,12 @@ import {
   CIVIL_V2_STRUCTURE_VERSION,
 } from '../universal-layout/civil-layout-v2-fake-constants';
 import {
+  CIVIL_V2_PRODUCTION_COMPONENT_ID,
+  CIVIL_V2_PRODUCTION_HOST_ID,
+  CIVIL_V2_PRODUCTION_SCREEN_ID,
+  CIVIL_V2_PRODUCTION_STRUCTURE_VERSION,
+} from '../universal-layout/civil-layout-v2-production-constants';
+import {
   civilV2HostSafetyMessage,
   getCivilV2HostSafetyFailure,
   isCivilV2CentralAccessibilityAllowed,
@@ -30,7 +36,7 @@ type FakeState = {
   message: string;
 };
 
-type Backend = 'local-fake' | 'central-fake' | 'central-openai';
+type Backend = 'local-fake' | 'central-fake' | 'central-openai' | 'production-openai';
 
 function isCentralBackend(backend: Backend): boolean {
   return backend !== 'local-fake';
@@ -939,7 +945,7 @@ function buildRequest(
   return result;
 }
 
-function isValidatedFakeEnvelope(value: unknown): value is {
+function isValidatedFakeEnvelope(value: unknown, backend: Backend): value is {
   accepted: true;
   model: { structureHash: string; constraintHash: string };
   plan: UniversalLayoutV2Plan;
@@ -957,20 +963,26 @@ function isValidatedFakeEnvelope(value: unknown): value is {
   const operation = operations[0] as Record<string, unknown> | null;
   return model.schemaVersion === 2
     && model.contractVersion === 'universal-layout.v2'
-    && model.hostId === CIVIL_V2_FAKE_HOST_ID
-    && model.screenId === CIVIL_V2_SCREEN_ID
-    && model.structureVersion === CIVIL_V2_STRUCTURE_VERSION
+    && model.hostId === (backend === 'production-openai' ? CIVIL_V2_PRODUCTION_HOST_ID : CIVIL_V2_FAKE_HOST_ID)
+    && model.screenId === (backend === 'production-openai' ? CIVIL_V2_PRODUCTION_SCREEN_ID : CIVIL_V2_SCREEN_ID)
+    && model.structureVersion === (
+      backend === 'production-openai' ? CIVIL_V2_PRODUCTION_STRUCTURE_VERSION : CIVIL_V2_STRUCTURE_VERSION
+    )
     && plan.schemaVersion === 2
     && plan.contractVersion === 'universal-layout.v2'
-    && plan.hostId === CIVIL_V2_FAKE_HOST_ID
-    && plan.screenId === CIVIL_V2_SCREEN_ID
-    && plan.structureVersion === CIVIL_V2_STRUCTURE_VERSION
+    && plan.hostId === (backend === 'production-openai' ? CIVIL_V2_PRODUCTION_HOST_ID : CIVIL_V2_FAKE_HOST_ID)
+    && plan.screenId === (backend === 'production-openai' ? CIVIL_V2_PRODUCTION_SCREEN_ID : CIVIL_V2_SCREEN_ID)
+    && plan.structureVersion === (
+      backend === 'production-openai' ? CIVIL_V2_PRODUCTION_STRUCTURE_VERSION : CIVIL_V2_STRUCTURE_VERSION
+    )
     && typeof plan.structureHash === 'string'
     && plan.structureHash === model.structureHash
     && typeof plan.constraintHash === 'string'
     && plan.constraintHash === model.constraintHash
     && operation?.type === 'selectLayoutOption'
-    && operation.targetId === CIVIL_V2_COMPONENT_ID
+    && operation.targetId === (
+      backend === 'production-openai' ? CIVIL_V2_PRODUCTION_COMPONENT_ID : CIVIL_V2_COMPONENT_ID
+    )
     && operation.groupId === CIVIL_V2_OPTION_GROUP_ID
     && operation.optionId === CIVIL_V2_SAFE_LIST_OPTION_ID;
 }
@@ -1067,6 +1079,7 @@ export function useUniversalLayoutV2Fake({
     optionId: typeof CIVIL_V2_SAFE_LIST_OPTION_ID | null,
     requestSource: 'manual' | 'qr-auto' = 'manual',
   ) => {
+    if (import.meta.env.PROD && backend !== 'production-openai') return;
     if (!enabled || step !== 'main-menu' || pendingRef.current) return;
     if (optionId === null) {
       cancel('', 'MANUAL_PLAN_CLEAR');
@@ -1111,7 +1124,9 @@ export function useUniversalLayoutV2Fake({
       pending: true,
       message: backend === 'central-fake'
         ? 'Development relay를 통해 중앙 Universal v2 Fake 계획을 확인하는 중입니다.'
-        : '첨부된 Universal v2 계약으로 로컬 Fake 계획을 검증하는 중입니다.',
+        : backend === 'production-openai'
+          ? '현재 증명서 구조와 접근성 조건을 확인하고 있습니다.'
+          : '첨부된 Universal v2 계약으로 로컬 Fake 계획을 검증하는 중입니다.',
     };
     stateRef.current = pendingState;
     setState(pendingState);
@@ -1128,17 +1143,46 @@ export function useUniversalLayoutV2Fake({
     let validationDiagnosticSent = false;
 
     try {
-      const endpoint = backend === 'central-fake'
-        ? '/api/dev/universal-layout/v2-central-plan'
-        : backend === 'central-openai'
-          ? '/api/dev/universal-layout/v2-openai-plan'
-          : '/api/dev/universal-layout/v2-fake';
+      let endpoint: string;
+      if (import.meta.env.PROD) {
+        endpoint = '/api/production/universal-layout/v2/openai-plan';
+      } else if (backend === 'central-fake') {
+        endpoint = '/api/dev/universal-layout/v2-central-plan';
+      } else if (backend === 'central-openai') {
+        endpoint = '/api/dev/universal-layout/v2-openai-plan';
+      } else {
+        endpoint = '/api/dev/universal-layout/v2-fake';
+      }
+      const headers: Record<string, string> = {
+        'Content-Type': 'application/json',
+        Accept: 'application/json',
+      };
+      let requestBody: unknown = context.request;
+      if (backend === 'production-openai') {
+        if (!globalThis.crypto?.randomUUID) throw new Error('IDEMPOTENCY_KEY_UNAVAILABLE');
+        headers['Idempotency-Key'] = globalThis.crypto.randomUUID();
+        requestBody = {
+          ...(context.request as Record<string, unknown>),
+          qrProfile: {
+            textSize: profile.textSize,
+            buttonSize: profile.buttonSize,
+            contrast: profile.contrast,
+            bottomControls: profile.bottomControls,
+            easyLanguage: profile.easyLanguage,
+            smartGuide: profile.smartGuide,
+            scrollGuidance: profile.scrollGuidance,
+            voiceGuidance: profile.voiceGuidance,
+            viewportMode: profile.viewportMode,
+          },
+        };
+      }
       const response = await fetch(endpoint, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+        headers,
         cache: 'no-store',
+        credentials: 'same-origin',
         signal: controller.signal,
-        body: JSON.stringify(context.request),
+        body: JSON.stringify(requestBody),
       });
       const payload: unknown = await response.json().catch(() => null);
       const safeOptionId = getAllowedOptionId(payload);
@@ -1151,7 +1195,7 @@ export function useUniversalLayoutV2Fake({
         profile,
         includeLayoutSnapshot: true,
       });
-      const envelopeValid = response.ok && isValidatedFakeEnvelope(payload);
+      const envelopeValid = response.ok && isValidatedFakeEnvelope(payload, backend);
       if (!envelopeValid) {
         import.meta.env.DEV && logClientDiagnostic({
           stage: 'client_validator_rejected',
@@ -1215,7 +1259,9 @@ export function useUniversalLayoutV2Fake({
         requestId: requestGeneration,
         startedAt,
         pending: false,
-        message: backend === 'central-fake' || backend === 'central-openai'
+        message: backend === 'production-openai'
+          ? 'Production 중앙 계획이 서버 측 공통 정책 검증을 통과했습니다.'
+          : backend === 'central-fake' || backend === 'central-openai'
           ? `중앙 Development v2 ${backend === 'central-openai' ? 'OpenAI' : 'Fake'} 계획이 현재 모델과 호스트 정책 검증을 통과했습니다.`
           : '로컬 Development 정책으로 reserved-safe-list를 검증했습니다. 중앙 API와 AI는 호출하지 않았습니다.',
       };
@@ -1277,10 +1323,12 @@ export function useUniversalLayoutV2Fake({
         });
       }
       const errorCode = error instanceof Error ? error.message : 'INVALID_V2_PLAN';
-      const message = isCentralBackend(backend)
-        ? errorCode === 'RELAY_DISABLED'
-          ? '중앙 v2 Development relay가 OFF입니다. 로컬 Fake 또는 기존 배치를 사용하세요.'
-          : '중앙 v2 Development 계획을 받지 못했거나 검증에 실패했습니다. 기존 배치를 유지합니다.'
+      const message = backend === 'production-openai'
+        ? '중앙 레이아웃 최적화를 사용할 수 없어 기존 배치를 유지합니다. QR 접근성 설정은 계속 적용됩니다.'
+        : isCentralBackend(backend)
+          ? errorCode === 'RELAY_DISABLED'
+            ? '중앙 v2 Development relay가 OFF입니다. 로컬 Fake 또는 기존 배치를 사용하세요.'
+            : '중앙 v2 Development 계획을 받지 못했거나 검증에 실패했습니다. 기존 배치를 유지합니다.'
         : 'v2 Fake 계획이 공통 정책 검증을 통과하지 못해 기존 배치를 유지합니다.';
       const errorState = {
         ...emptyState,

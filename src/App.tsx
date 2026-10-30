@@ -96,6 +96,8 @@ function App() {
     id: number;
     profile: AccessibilityProfile;
   } | null>(null);
+  const [productionAutoQrEventId, setProductionAutoQrEventId] = useState<number | null>(null);
+  const productionStatusRequestedRef = useRef<number | null>(null);
   const qrAppliedEventCounterRef = useRef(0);
   const lastAutoQrEventRef = useRef<number | null>(null);
   const scheduledAutoQrEventRef = useRef<number | null>(null);
@@ -106,8 +108,15 @@ function App() {
     profile: accessibilityProfile,
     step,
     noticeOpen: Boolean(notice),
+    productionAutoQrEventId,
   });
-  autoQrLatestRef.current = { event: qrAppliedEvent, profile: accessibilityProfile, step, noticeOpen: Boolean(notice) };
+  autoQrLatestRef.current = {
+    event: qrAppliedEvent,
+    profile: accessibilityProfile,
+    step,
+    noticeOpen: Boolean(notice),
+    productionAutoQrEventId,
+  };
   const autoQrAnimationFramesRef = useRef<[number, number]>([0, 0]);
   const showViewportTestControls = import.meta.env.DEV
     && new URLSearchParams(window.location.search).get('viewport-test') === '1';
@@ -182,17 +191,23 @@ function App() {
     || universalLayoutMode === 'v2-openai';
   const autoQrV2Backend = qrAppliedEvent === null
     ? null
-    : selectCivilQrAutoV2Backend(
+    : import.meta.env.DEV
+      ? selectCivilQrAutoV2Backend(
         accessibilityProfile,
-        import.meta.env.DEV,
+        true,
         __CIVIL_QR_AUTO_LAYOUT_V2_MODE__,
-      );
+      )
+      : import.meta.env.PROD && productionAutoQrEventId === qrAppliedEvent.id
+        ? 'production-openai'
+        : null;
   const autoQrV2Enabled = autoQrV2Backend !== null;
-  const universalV2Backend = universalLayoutMode === 'v2-central'
-    ? 'central-fake'
-    : universalLayoutMode === 'v2-openai'
-      ? 'central-openai'
-      : 'local-fake';
+  const universalV2Backend = import.meta.env.PROD
+    ? 'local-fake'
+    : universalLayoutMode === 'v2-central'
+      ? 'central-fake'
+      : universalLayoutMode === 'v2-openai'
+        ? 'central-openai'
+        : 'local-fake';
   const universalV2HookBackend = autoQrV2Backend ?? universalV2Backend;
   const universalLayoutBackend = universalLayoutMode === 'central'
     ? 'central'
@@ -206,7 +221,8 @@ function App() {
     backend: universalLayoutBackend,
   });
   const universalLayoutV2Fake = useUniversalLayoutV2Fake({
-    enabled: import.meta.env.DEV && (showUniversalV2Controls || autoQrV2Enabled),
+    enabled: (import.meta.env.DEV && (showUniversalV2Controls || autoQrV2Enabled))
+      || (import.meta.env.PROD && autoQrV2Enabled),
     step,
     profile: layoutAccessibilityProfile,
     backend: universalV2HookBackend,
@@ -227,6 +243,7 @@ function App() {
       setAccessibilityProfile({ ...DEFAULT_ACCESSIBILITY_PROFILE });
       setAccessibilityProfileApplied(false);
       setQrAppliedEvent(null);
+      setProductionAutoQrEventId(null);
       setDevAccessibilityExperienceActive(false);
       setDevViewportPercent(null);
       accessibilitySdkRef.current?.endSession();
@@ -277,13 +294,12 @@ function App() {
   }, []);
   const applyQrAccessibilityProfile = useCallback((profile: AccessibilityProfile) => {
     applyAccessibilityProfile(profile);
-    if (import.meta.env.DEV) {
-      qrAppliedEventCounterRef.current += 1;
-      setQrAppliedEvent({
-        id: qrAppliedEventCounterRef.current,
-        profile,
-      });
-    }
+    qrAppliedEventCounterRef.current += 1;
+    setProductionAutoQrEventId(null);
+    setQrAppliedEvent({
+      id: qrAppliedEventCounterRef.current,
+      profile,
+    });
   }, [applyAccessibilityProfile]);
   const startDevAccessibilityExperience = useCallback(() => {
     const profile = DEV_ACCESSIBILITY_EXPERIENCE_PROFILE;
@@ -312,6 +328,45 @@ function App() {
   }, [accessibilityProfileApplied]);
 
   useEffect(() => {
+    if (!import.meta.env.PROD || qrAppliedEvent === null) return;
+    if (productionStatusRequestedRef.current === qrAppliedEvent.id) return;
+    if (notice || step !== 'main-menu' || accessibilityProfile !== qrAppliedEvent.profile) return;
+    if (
+      !isCivilGQrProfile(accessibilityProfile)
+      || window.innerWidth !== 1080
+      || window.innerHeight !== 1920
+    ) {
+      productionStatusRequestedRef.current = qrAppliedEvent.id;
+      setProductionAutoQrEventId(null);
+      return;
+    }
+
+    productionStatusRequestedRef.current = qrAppliedEvent.id;
+    const controller = new AbortController();
+    void fetch('/api/production/universal-layout/v2/status', {
+      method: 'GET',
+      cache: 'no-store',
+      credentials: 'same-origin',
+      signal: controller.signal,
+      headers: { Accept: 'application/json' },
+    }).then(async (response) => {
+      const payload: unknown = await response.json().catch(() => null);
+      if (!response.ok || typeof payload !== 'object' || payload === null) return false;
+      return (payload as Record<string, unknown>).enabled === true;
+    }).then((enabled) => {
+      if (controller.signal.aborted) return;
+      if (
+        enabled
+        && qrAppliedEvent.id === productionStatusRequestedRef.current
+        && accessibilityProfile === qrAppliedEvent.profile
+      ) setProductionAutoQrEventId(qrAppliedEvent.id);
+    }).catch(() => {
+      // Production AI stays disabled for this QR event when local readiness cannot be confirmed.
+    });
+    return () => controller.abort();
+  }, [accessibilityProfile, notice, qrAppliedEvent, step]);
+
+  useEffect(() => {
     if (qrAppliedEvent === null) {
       if (scheduledAutoQrEventRef.current !== null) {
         for (const frame of autoQrAnimationFramesRef.current) window.cancelAnimationFrame(frame);
@@ -327,9 +382,13 @@ function App() {
     autoQrV2CancelRef.current();
     if (accessibilityProfile !== qrAppliedEvent.profile) return;
     if (notice) return;
+    if (import.meta.env.PROD && productionAutoQrEventId !== qrAppliedEvent.id) return;
 
+    const productionAutoEnabled = import.meta.env.PROD
+      && autoQrV2Backend === 'production-openai'
+      && productionAutoQrEventId === qrAppliedEvent.id;
     if (
-      !import.meta.env.DEV
+      (!import.meta.env.DEV && !productionAutoEnabled)
       || !isCivilGQrProfile(accessibilityProfile)
       || step !== 'main-menu'
       || window.innerWidth !== 1080
@@ -351,6 +410,10 @@ function App() {
         if (
           latest.profile !== latest.event.profile
           || !isCivilGQrProfile(latest.profile)
+          || (
+            !import.meta.env.DEV
+            && latest.productionAutoQrEventId !== qrAppliedEvent.id
+          )
           || latest.step !== 'main-menu'
           || window.innerWidth !== 1080
           || window.innerHeight !== 1920
@@ -377,7 +440,7 @@ function App() {
         void autoQrV2ApplyRef.current(CIVIL_V2_SAFE_LIST_OPTION_ID, 'qr-auto');
       });
     });
-  }, [accessibilityProfile, notice, qrAppliedEvent, step]);
+  }, [accessibilityProfile, autoQrV2Backend, notice, productionAutoQrEventId, qrAppliedEvent, step]);
 
   useEffect(() => () => {
     for (const frame of autoQrAnimationFramesRef.current) window.cancelAnimationFrame(frame);
@@ -422,7 +485,7 @@ function App() {
                 universalMockBackend={universalLayoutBackend}
                 onUniversalMockApply={universalLayoutMock.apply}
                 showUniversalV2Controls={showUniversalV2Controls}
-                universalV2Backend={universalV2HookBackend}
+                universalV2Backend={universalV2Backend}
                 universalV2OptionId={universalLayoutV2Fake.activeOptionId}
                 universalV2Pending={universalLayoutV2Fake.pending}
                 universalV2Message={universalLayoutV2Fake.message}
