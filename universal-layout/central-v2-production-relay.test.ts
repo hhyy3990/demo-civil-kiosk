@@ -53,7 +53,7 @@ const input = {
     textSize: 'large',
     buttonSize: 'large',
     contrast: 'high',
-    bottomControls: true,
+    bottomControls: false,
     easyLanguage: true,
     smartGuide: true,
     scrollGuidance: true,
@@ -145,6 +145,70 @@ test('Production relay stays blocked before fetch unless all independent gates a
     const forward = createCivilProductionV2Forwarder(readyConfig(fetcher, overrides));
     const result = await forward(input, eventKey(2), `session-${calls}-${Object.keys(overrides)[0]}`);
     assert.notEqual(result.status, 200);
+  }
+  assert.equal(calls, 0);
+});
+
+test('Production relay blocks non-target claimed viewport dimensions before provider fetch', async () => {
+  let calls = 0;
+  const fetcher: typeof fetch = async () => {
+    calls += 1;
+    throw new Error('unexpected fake fetch');
+  };
+  const forward = createCivilProductionV2Forwarder(readyConfig(fetcher));
+  const viewports = [
+    { width: 1080, height: 1919, gridWidth: 470 },
+    { width: 1079, height: 1920, gridWidth: 470 },
+    { width: 1200, height: 1920, gridWidth: 470 },
+    { width: 1920, height: 1080, gridWidth: 470 },
+  ];
+  for (const [index, viewport] of viewports.entries()) {
+    const result = await forward({
+      ...input,
+      request: { ...input.request, viewport },
+    }, eventKey(60 + index), `session-viewport-${index}`);
+    assert.equal(result.status, 409);
+    assert.equal((result.body as { error: string }).error, 'PRODUCTION_MODEL_REJECTED');
+  }
+  assert.equal(calls, 0);
+});
+
+test('Production relay rejects unsafe host geometry and policy claims before provider fetch', async () => {
+  let calls = 0;
+  const fetcher: typeof fetch = async () => {
+    calls += 1;
+    throw new Error('unexpected fake fetch');
+  };
+  const forward = createCivilProductionV2Forwarder(readyConfig(fetcher));
+  const cases = [
+    { eligibility: { geometryKnown: false } },
+    { eligibility: { footerVisible: false } },
+    { eligibility: { footerInFlow: false } },
+    { eligibility: { qrDockVisible: false } },
+    { eligibility: { qrDockReservesBottom: false } },
+    { eligibility: { menuClearOfFooter: false } },
+    { eligibility: { menuClearOfQrDock: false } },
+    { eligibility: { minimumTouchTargetPx: 43 } },
+    { eligibility: { menuHitTestSafe: false } },
+    { eligibility: { reservedBottomCapability: false } },
+    { eligibility: { targetViewport: false } },
+    { eligibility: { centralProfileAllowed: false } },
+    { request: { layoutCapabilities: [] } },
+    { request: { itemIds: [...input.request.itemIds].reverse() } },
+  ];
+  for (const [index, override] of cases.entries()) {
+    const invalidInput = {
+      ...input,
+      ...('eligibility' in override
+        ? { eligibility: { ...input.eligibility, ...override.eligibility } }
+        : {}),
+      ...('request' in override
+        ? { request: { ...input.request, ...override.request } }
+        : {}),
+    };
+    const result = await forward(invalidInput, eventKey(70 + index), `session-unsafe-${index}`);
+    assert.equal(result.status, 409);
+    assert.equal((result.body as { error: string }).error, 'PRODUCTION_MODEL_REJECTED');
   }
   assert.equal(calls, 0);
 });

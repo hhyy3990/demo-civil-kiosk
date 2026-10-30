@@ -47,7 +47,9 @@ const productionRequestSchema = z.object({
     textSize: z.literal('large'),
     buttonSize: z.literal('large'),
     contrast: z.literal('high'),
-    bottomControls: z.literal(true),
+    // SDK v0.5.x schema-v5 profiles encode bottom interaction through viewportMode;
+    // the legacy bottomControls flag is normalized to false by the SDK.
+    bottomControls: z.literal(false),
     easyLanguage: z.literal(true),
     smartGuide: z.literal(true),
     scrollGuidance: z.literal(true),

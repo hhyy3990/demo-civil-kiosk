@@ -95,7 +95,7 @@ export function MainMenuScreen({
         data-universal-columns={universalMockColumns ?? undefined}
         data-universal-layout-option={universalV2OptionId ?? undefined}
       >
-        {certificateCategories.map((category, index) => <button key={category} id={index === 0 ? 'main-resident-button' : `certificate-category-${index + 1}`} data-a11y-action-id={import.meta.env.DEV ? `civil.certificate.${String(index + 1).padStart(2, '0')}` : undefined} data-a11y-menu-item className={`category-button ${index === 0 ? 'category-active' : ''}`} onClick={() => onSelectCategory(category)}>
+        {certificateCategories.map((category, index) => <button key={category} id={index === 0 ? 'main-resident-button' : `certificate-category-${index + 1}`} data-a11y-action-id={`civil.certificate.${String(index + 1).padStart(2, '0')}`} data-a11y-menu-item className={`category-button ${index === 0 ? 'category-active' : ''}`} onClick={() => onSelectCategory(category)}>
           <span className="category-number">{String(index + 1).padStart(2, '0')}</span><span className="category-name">{category}</span><ChevronRight size={16} className="category-arrow" />
         </button>)}
       </div>

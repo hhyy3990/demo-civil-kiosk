@@ -165,6 +165,7 @@ type ClientDiagnosticFailureClass =
   | 'REQUEST_CANCELLED'
   | 'REPLACED_BY_NEW_REQUEST'
   | 'LAYOUT_ATTRIBUTE_NOT_APPLIED'
+  | 'LAYOUT_PRESET_NOT_RENDERED'
   | 'APPLIED_PLAN_UNSAFE';
 
 type DiagnosticSafetyResult = 'not_checked' | 'pass' | 'fail';
@@ -194,6 +195,7 @@ const CLIENT_DIAGNOSTIC_FAILURE_CLASSES = new Set<ClientDiagnosticFailureClass>(
   'REQUEST_CANCELLED',
   'REPLACED_BY_NEW_REQUEST',
   'LAYOUT_ATTRIBUTE_NOT_APPLIED',
+  'LAYOUT_PRESET_NOT_RENDERED',
   'APPLIED_PLAN_UNSAFE',
 ]);
 
@@ -217,6 +219,23 @@ function getGridColumnCount(): number | null {
   } catch {
     return null;
   }
+}
+
+function getRenderedPresetFailure(optionId: string | null): ClientDiagnosticFailureClass | null {
+  if (optionId !== CIVIL_V2_SAFE_LIST_OPTION_ID) return null;
+  const grid = document.querySelector<HTMLElement>('.certificate-grid');
+  if (!grid?.isConnected || grid.dataset.universalLayoutOption !== optionId) {
+    return 'LAYOUT_ATTRIBUTE_NOT_APPLIED';
+  }
+  const columnGap = Number.parseFloat(window.getComputedStyle(grid).columnGap);
+  if (
+    getGridColumnCount() !== 1
+    || !Number.isFinite(columnGap)
+    || Math.abs(columnGap - 4) > 0.5
+  ) {
+    return 'LAYOUT_PRESET_NOT_RENDERED';
+  }
+  return null;
 }
 
 function getAllowedOptionId(value: unknown): typeof CIVIL_V2_SAFE_LIST_OPTION_ID | null {
@@ -1546,6 +1565,30 @@ export function useUniversalLayoutV2Fake({
           latest.key,
           `적용 후 화면 안전 검사를 통과하지 못해 배치 계획만 해제했습니다. 접근성 설정은 유지됩니다. ${latest.reason}`,
           latest.failureClass ?? 'APPLIED_PLAN_UNSAFE',
+        );
+        return;
+      }
+      const renderedPresetFailure = backend === 'production-openai'
+        ? getRenderedPresetFailure(optionId)
+        : null;
+      if (renderedPresetFailure) {
+        if (safetyDiagnosticRequestRef.current !== requestId) {
+          safetyDiagnosticRequestRef.current = requestId;
+          import.meta.env.DEV && logClientDiagnostic({
+            stage: 'post_apply_safety_failed',
+            requestId,
+            optionId,
+            startedAt,
+            safetyResult: 'fail',
+            failureClass: renderedPresetFailure,
+            profile,
+            includeLayoutSnapshot: true,
+          });
+        }
+        clearAppliedPlan(
+          latest.key,
+          '요청한 1열 메뉴 배치를 실제 화면에서 확인할 수 없어 배치 계획만 해제했습니다. 접근성 설정은 유지됩니다.',
+          renderedPresetFailure,
         );
         return;
       }
