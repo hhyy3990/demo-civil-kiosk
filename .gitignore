@@ -3,3 +3,8 @@ dist/
 dist-server/
 *.tsbuildinfo
 .vite/
+
+# Local environment files and credentials
+.env
+.env.*
+!.env.example
