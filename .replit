@@ -42,5 +42,5 @@ CIVIL_UNIVERSAL_LAYOUT_V2_LOCAL_FAKE_AUTO_ENABLED = "false"
 
 [deployment]
 deploymentTarget = "autoscale"
-run = ["node", "server/deployment-diagnostic.mjs"]
+run = ["node", "server/production-bootstrap.mjs"]
 build = ["npm", "run", "build"]
