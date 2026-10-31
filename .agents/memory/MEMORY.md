@@ -10,3 +10,4 @@
 - [QR test interception safety](qr-test-interception-safety.md) — synthetic QR browser tests must intercept requests at CDP level before navigation, not only patch page fetch.
 - [Civil Production AI gate](civil-production-ai-gates.md) — keep Production layout AI distinct from Development and blocked until the central host policy is registered.
 - [Civil public operation](civil-public-operation.md) — the actual Civil app must remain public for at least 60 days; Preview and diagnostic servers are not final submissions.
+- [Autoscale startup health retries](autoscale-health-retries.md) — early health-check failures can precede app startup even when the diagnostic service later becomes healthy.
