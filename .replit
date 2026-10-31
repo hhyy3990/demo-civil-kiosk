@@ -44,3 +44,4 @@ CIVIL_UNIVERSAL_LAYOUT_V2_LOCAL_FAKE_AUTO_ENABLED = "false"
 deploymentTarget = "vm"
 run = ["node", "server/production-bootstrap.mjs"]
 build = ["npm", "run", "build"]
+ignorePorts = false
