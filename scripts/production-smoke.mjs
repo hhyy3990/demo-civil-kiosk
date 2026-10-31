@@ -187,6 +187,7 @@ async function main() {
   let startupFailureCode = '';
   let portFailure = false;
   let bootStartedSeen = false;
+  let listeningSeen = false;
   let readyResolve;
   const readyPromise = new Promise((resolvePromise) => {
     readyResolve = resolvePromise;
@@ -207,6 +208,16 @@ async function main() {
           if (record.stage === 'startup_import_failed') {
             startupFailureCode = 'IMPORT_FAILED';
           }
+          if (record.stage === 'server_listen_failed') {
+            startupFailureCode = 'LISTEN_FAILED';
+          }
+          if (record.stage === 'startup_preflight_failed') {
+            if (record.errorCode === 'INVALID_PORT') startupFailureCode = 'PORT_INVALID';
+            if (record.errorCode === 'ARTIFACT_MISSING') startupFailureCode = 'ARTIFACT_MISSING';
+          }
+          if (record.stage === 'app_ready' && listeningSeen) {
+            readyResolve(true);
+          }
           if (record.stage === 'startup_preflight') {
             if (record.portValid !== true) startupFailureCode = 'PORT_INVALID';
             else if (
@@ -225,7 +236,7 @@ async function main() {
     }
 
     if (line.includes('EADDRINUSE') || line.includes('EADDRNOTAVAIL')) portFailure = true;
-    if (line.includes('[civil-production-server] listening port=')) readyResolve(true);
+    if (line.includes('[civil-production-server] listening port=')) listeningSeen = true;
     if (streamName === 'stderr' && line.includes('startup_import_failed')) {
       startupFailureCode = 'IMPORT_FAILED';
     }

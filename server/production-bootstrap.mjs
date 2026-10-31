@@ -1,4 +1,5 @@
 import { existsSync, statSync, writeSync } from 'node:fs';
+import { createServer } from 'node:http';
 import { fileURLToPath } from 'node:url';
 
 const startedAt = performance.now();
@@ -66,21 +67,88 @@ function dependencyAvailable(name) {
 
 diagnostic('boot_started');
 const port = Number.parseInt(process.env.PORT ?? '5000', 10);
-diagnostic('startup_preflight', {
+const portValid = Number.isInteger(port) && port > 0 && port <= 65535;
+const startupPreflight = {
   portProvided: process.env.PORT !== undefined,
-  portValid: Number.isInteger(port) && port >= 0 && port <= 65535,
+  portValid,
   portMatchesConfiguredLocalPort: port === 5000,
   serverEntryPresent: isFile(new URL('../dist-server/server/production-server.js', import.meta.url)),
   indexHtmlPresent: isFile(new URL('../dist/index.html', import.meta.url)),
   sdkDependencyAvailable: dependencyAvailable('@naebangsik/kiosk-accessibility-sdk'),
   validatorDependencyAvailable: dependencyAvailable('zod'),
+};
+diagnostic('startup_preflight', startupPreflight);
+
+if (!portValid) {
+  diagnostic('startup_preflight_failed', { errorCode: 'INVALID_PORT' }, true);
+  process.exit(1);
+}
+
+let civilRequestHandler = null;
+const server = createServer((request, response) => {
+  if (!civilRequestHandler) {
+    response.statusCode = 503;
+    response.setHeader('Content-Type', 'application/json; charset=utf-8');
+    response.setHeader('Cache-Control', 'no-store');
+    response.setHeader('X-Content-Type-Options', 'nosniff');
+    response.end(JSON.stringify({ error: 'APP_INITIALIZING' }));
+    return;
+  }
+
+  try {
+    civilRequestHandler(request, response);
+  } catch (error) {
+    diagnostic('request_handler_failed', safeError(error), true);
+    if (!response.headersSent) {
+      response.statusCode = 500;
+      response.setHeader('Content-Type', 'application/json; charset=utf-8');
+      response.setHeader('Cache-Control', 'no-store');
+      response.setHeader('X-Content-Type-Options', 'nosniff');
+      response.end(JSON.stringify({ error: 'INTERNAL_ERROR' }));
+    } else {
+      response.destroy();
+    }
+  }
 });
 
 try {
+  await new Promise((resolve, reject) => {
+    const onListenError = (error) => reject(error);
+    server.once('error', onListenError);
+    server.listen(port, '0.0.0.0', () => {
+      server.removeListener('error', onListenError);
+      diagnostic('listener_open', { port });
+      writeSync(1, `[civil-production-server] listening port=${port}\n`);
+      resolve();
+    });
+  });
+} catch (error) {
+  fail('server_listen_failed', error);
+}
+
+if (
+  !startupPreflight.serverEntryPresent
+  || !startupPreflight.indexHtmlPresent
+  || !startupPreflight.sdkDependencyAvailable
+  || !startupPreflight.validatorDependencyAvailable
+) {
+  diagnostic('startup_preflight_failed', { errorCode: 'ARTIFACT_MISSING' }, true);
+  process.exit(1);
+}
+
+try {
   diagnostic('server_import_started');
-  await import(new URL('../dist-server/server/production-server.js', import.meta.url));
-  // Import completion is not proof that the server has begun listening.
+  const productionModule = await import(new URL('../dist-server/server/production-server.js', import.meta.url));
+  if (typeof productionModule.handleProductionRequest !== 'function') {
+    diagnostic('startup_import_failed', {
+      errorName: 'TypeError',
+      errorCode: 'PRODUCTION_HANDLER_MISSING',
+    }, true);
+    process.exit(1);
+  }
+  civilRequestHandler = productionModule.handleProductionRequest;
   diagnostic('server_module_loaded');
+  diagnostic('app_ready');
 } catch (error) {
   fail('startup_import_failed', error);
 }

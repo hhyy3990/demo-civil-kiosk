@@ -1,6 +1,6 @@
 import { createReadStream } from 'node:fs';
 import { access, stat } from 'node:fs/promises';
-import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
+import type { IncomingMessage, ServerResponse } from 'node:http';
 import { extname, normalize, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createQrProfileRelay } from '../src/server/qr-profile-relay.js';
@@ -10,7 +10,6 @@ process.env.NODE_ENV ??= 'production';
 
 const rootDir = resolve(fileURLToPath(new URL('../../', import.meta.url)));
 const staticRoot = resolve(rootDir, 'dist');
-const port = Number.parseInt(process.env.PORT ?? '5000', 10);
 
 const qrRelay = createQrProfileRelay({
   accessToken: process.env.QR_PROFILE_PRODUCTION_ACCESS_TOKEN,
@@ -117,7 +116,7 @@ async function dispatchProductionRelay(
   }
 }
 
-const server = createServer((request, response) => {
+export function handleProductionRequest(request: IncomingMessage, response: ServerResponse) {
   qrRelay(request, response, (error) => {
     if (error) return sendJson(response, 500, { error: 'INTERNAL_ERROR' });
     void dispatchProductionRelay(request, response, (relayError) => {
@@ -125,8 +124,4 @@ const server = createServer((request, response) => {
       void serveStatic(request, response);
     });
   });
-});
-
-server.listen(port, '0.0.0.0', () => {
-  console.info(`[civil-production-server] listening port=${port}`);
-});
+}
