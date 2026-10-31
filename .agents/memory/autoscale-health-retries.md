@@ -8,3 +8,9 @@ When investigating a failed deployment, distinguish pre-listener health-check er
 **Why:** An early failed probe did not by itself prevent the diagnostic deployment from becoming healthy, so treating that first error as the root cause would be misleading.
 
 **How to apply:** Correlate health-check timestamps with revision-scoped runtime startup and listen logs. Do not add an early “healthy” response unless the real app handler is ready.
+
+If the actual-app build smoke passes but its remote revision still has no runtime logs, do not repeat similar build-only tests; move to evaluating a public Reserved VM or external Node host. A build-container smoke test is not proof of the final runtime image.
+
+**Why:** the user explicitly asked to stop repeating equivalent Autoscale checks once this evidence is available and pursue a working public runtime.
+
+**How to apply:** Treat local/build smoke as a preflight only. If deployment telemetry remains absent after a successful preflight, report that platform runtime remains unobserved and proceed to compare alternate hosting without incurring costs or changing deployment type without approval.

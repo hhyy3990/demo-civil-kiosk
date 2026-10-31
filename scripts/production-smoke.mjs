@@ -1,9 +1,10 @@
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import { dirname, resolve } from 'node:path';
 import { spawn } from 'node:child_process';
-import { createServer as createTcpServer, request as httpRequest } from 'node:http';
+import { request as httpRequest } from 'node:http';
+import { createServer as createTcpServer } from 'node:net';
 import { fileURLToPath } from 'node:url';
 
 const projectRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
@@ -23,36 +24,47 @@ function log(stage, fields = {}) {
   console.log(`[civil-production-smoke] ${JSON.stringify({ stage, ...fields })}`);
 }
 
-function readPackage(packagePath) {
-  return JSON.parse(readFileSync(packagePath, 'utf8'));
+function packageInfo(packageName) {
+  try {
+    const packagePath = require.resolve(`${packageName}/package.json`);
+    return { path: packagePath, ...JSON.parse(readFileSync(packagePath, 'utf8')) };
+  } catch {
+    return null;
+  }
 }
 
 function checkArtifacts() {
+  const bootstrapEntry = resolve(projectRoot, 'server/production-bootstrap.mjs');
   const serverEntry = resolve(projectRoot, 'dist-server/server/production-server.js');
   const indexHtml = resolve(projectRoot, 'dist/index.html');
-  const sdkPackagePath = require.resolve('@naebangsik/kiosk-accessibility-sdk/package.json');
-  const zodPackagePath = require.resolve('zod/package.json');
-  const sdkVersion = readPackage(sdkPackagePath).version;
-  const zodVersion = readPackage(zodPackagePath).version;
+  const appManifest = JSON.parse(readFileSync(resolve(projectRoot, 'package.json'), 'utf8'));
+  const sdk = packageInfo('@naebangsik/kiosk-accessibility-sdk');
+  const zod = packageInfo('zod');
+  const runtimeDependencies = appManifest.dependencies ?? {};
   const result = {
+    bootstrapEntryPresent: existsSync(bootstrapEntry),
     serverEntryPresent: existsSync(serverEntry),
     indexHtmlPresent: existsSync(indexHtml),
-    sdkAvailable: existsSync(sdkPackagePath) && sdkVersion === '0.5.31',
-    sdkVersion,
-    zodAvailable: existsSync(zodPackagePath),
-    zodVersion,
+    sdkDeclaredAsRuntimeDependency: Boolean(runtimeDependencies['@naebangsik/kiosk-accessibility-sdk']),
+    sdkAvailable: Boolean(sdk?.path) && sdk.version === '0.5.31',
+    sdkVersion: sdk?.version ?? 'missing',
+    zodDeclaredAsRuntimeDependency: Boolean(runtimeDependencies.zod),
+    zodAvailable: Boolean(zod?.path),
+    zodVersion: zod?.version ?? 'missing',
   };
 
   log('artifacts', result);
   if (
-    !result.serverEntryPresent
+    !result.bootstrapEntryPresent
+    || !result.serverEntryPresent
     || !result.indexHtmlPresent
+    || !result.sdkDeclaredAsRuntimeDependency
     || !result.sdkAvailable
+    || !result.zodDeclaredAsRuntimeDependency
     || !result.zodAvailable
   ) {
     throw new SmokeFailure('ARTIFACT_MISSING');
   }
-  return indexHtml;
 }
 
 async function choosePort() {
@@ -125,6 +137,19 @@ function requestLocal(port, path) {
   });
 }
 
+async function checkedRequest(port, path, checkName) {
+  try {
+    return await requestLocal(port, path);
+  } catch (error) {
+    log('http_transport_failure', {
+      checkName,
+      errorName: safeName(error),
+      errorCode: safeCode(error),
+    });
+    throw new SmokeFailure('HTTP_CONNECTION_FAILED');
+  }
+}
+
 function safeStartupFields(record) {
   const fields = {};
   for (const key of [
@@ -152,10 +177,6 @@ function safeStartupFields(record) {
   return fields;
 }
 
-function wait(ms) {
-  return new Promise((resolvePromise) => setTimeout(resolvePromise, ms));
-}
-
 async function main() {
   let failureCode = '';
   let child;
@@ -163,8 +184,9 @@ async function main() {
   let childExitCode = null;
   let childSignal = null;
   let childError = null;
-  let startupFailure = false;
+  let startupFailureCode = '';
   let portFailure = false;
+  let bootStartedSeen = false;
   let readyResolve;
   const readyPromise = new Promise((resolvePromise) => {
     readyResolve = resolvePromise;
@@ -173,9 +195,6 @@ async function main() {
   const exitPromise = new Promise((resolvePromise) => {
     exitResolve = resolvePromise;
   });
-  let stdoutBuffer = '';
-  let stderrBuffer = '';
-
   const observeLine = (line, streamName) => {
     const marker = '[civil-production-bootstrap] ';
     const markerIndex = line.indexOf(marker);
@@ -184,18 +203,20 @@ async function main() {
         const record = JSON.parse(line.slice(markerIndex + marker.length));
         if (typeof record.stage === 'string') {
           log('bootstrap', { ...safeStartupFields(record), stageName: record.stage });
-          if (record.stage === 'startup_import_failed') startupFailure = true;
-          if (
-            record.stage === 'startup_preflight'
-            && (
-              record.portValid !== true
-              || record.serverEntryPresent !== true
+          if (record.stage === 'boot_started') bootStartedSeen = true;
+          if (record.stage === 'startup_import_failed') {
+            startupFailureCode = 'IMPORT_FAILED';
+          }
+          if (record.stage === 'startup_preflight') {
+            if (record.portValid !== true) startupFailureCode = 'PORT_INVALID';
+            else if (
+              record.serverEntryPresent !== true
               || record.indexHtmlPresent !== true
               || record.sdkDependencyAvailable !== true
               || record.validatorDependencyAvailable !== true
-            )
-          ) {
-            startupFailure = true;
+            ) {
+              startupFailureCode = 'ARTIFACT_MISSING';
+            }
           }
         }
       } catch {
@@ -205,7 +226,9 @@ async function main() {
 
     if (line.includes('EADDRINUSE') || line.includes('EADDRNOTAVAIL')) portFailure = true;
     if (line.includes('[civil-production-server] listening port=')) readyResolve(true);
-    if (streamName === 'stderr' && line.includes('startup_import_failed')) startupFailure = true;
+    if (streamName === 'stderr' && line.includes('startup_import_failed')) {
+      startupFailureCode = 'IMPORT_FAILED';
+    }
   };
 
   const attachOutput = (stream, streamName) => {
@@ -229,20 +252,36 @@ async function main() {
     } catch {
       // The force-kill check below determines whether cleanup succeeded.
     }
-    await Promise.race([exitPromise, wait(1200)]);
+    if (await waitForChildExit(1200)) return true;
     if (!childExited) {
       try {
         child.kill('SIGKILL');
       } catch {
         // Report cleanup failure if it remains alive.
       }
-      await Promise.race([exitPromise, wait(1200)]);
+      await waitForChildExit(1200);
     }
     return childExited;
   }
 
+  function waitForChildExit(timeoutMs) {
+    if (childExited) return Promise.resolve(true);
+    return new Promise((resolvePromise) => {
+      const onExit = () => {
+        clearTimeout(timer);
+        resolvePromise(true);
+      };
+      const timer = setTimeout(() => {
+        child?.removeListener('exit', onExit);
+        resolvePromise(false);
+      }, timeoutMs);
+      child?.once('exit', onExit);
+    });
+  }
+
   try {
-    const indexHtmlPath = checkArtifacts();
+    log('runtime_environment', { nodeVersion: process.versions.node, secretsPassed: false });
+    checkArtifacts();
     const port = await choosePort();
     log('spawn_started', { command: 'node server/production-bootstrap.mjs', portSelected: true });
 
@@ -277,27 +316,30 @@ async function main() {
       exitResolve({ kind: 'exit' });
     });
 
+    let startupTimer;
     const timeout = new Promise((resolvePromise) => {
-      setTimeout(() => resolvePromise({ kind: 'timeout' }), startupTimeoutMs);
+      startupTimer = setTimeout(() => resolvePromise({ kind: 'timeout' }), startupTimeoutMs);
     });
     const startup = await Promise.race([
       readyPromise.then((isReady) => ({ kind: isReady ? 'ready' : 'not_ready' })),
       exitPromise,
       timeout,
     ]);
+    clearTimeout(startupTimer);
 
     if (startup.kind !== 'ready') {
       if (childError) {
         log('startup_failure', { classification: 'START_FAILED', ...childError });
         throw new SmokeFailure('START_FAILED');
       }
-      if (startupFailure) throw new SmokeFailure('IMPORT_OR_PREFLIGHT_FAILED');
+      if (startupFailureCode) throw new SmokeFailure(startupFailureCode);
       if (portFailure || safeCode({ code: childError?.code }) === 'EADDRINUSE') {
         throw new SmokeFailure('PORT_CONFLICT');
       }
       if (startup.kind === 'exit') {
-        log('startup_failure', { classification: 'PROCESS_EXITED_BEFORE_LISTEN', exitCode: childExitCode });
-        throw new SmokeFailure('PROCESS_EXITED_BEFORE_LISTEN');
+        const classification = bootStartedSeen ? 'PROCESS_EXITED_BEFORE_LISTEN' : 'START_FAILED';
+        log('startup_failure', { classification, exitCode: childExitCode });
+        throw new SmokeFailure(classification);
       }
       log('startup_failure', { classification: 'START_TIMEOUT', timeoutMs: startupTimeoutMs });
       throw new SmokeFailure('START_TIMEOUT');
@@ -305,7 +347,7 @@ async function main() {
 
     log('server_ready', { ok: true });
 
-    const rootResponse = await requestLocal(port, '/');
+    const rootResponse = await checkedRequest(port, '/', 'root');
     log('root_http', { status: rootResponse.status, contentType: rootResponse.contentType.split(';')[0] });
     if (
       rootResponse.status !== 200
@@ -316,7 +358,7 @@ async function main() {
       throw new SmokeFailure('ROOT_HTTP_FAILED');
     }
 
-    const assetPaths = [...rootResponse.body.matchAll(/(?:src|href)="([^"]+)"/g)]
+    const referencedAssetPaths = [...rootResponse.body.matchAll(/(?:src|href)="([^"]+)"/g)]
       .map((match) => {
         try {
           const url = new URL(match[1], 'http://127.0.0.1');
@@ -328,26 +370,30 @@ async function main() {
         }
       })
       .filter((path) => path.endsWith('.js') || path.endsWith('.css'));
+    const assetDirectory = resolve(projectRoot, 'dist/assets');
+    const builtAssetPaths = readdirSync(assetDirectory)
+      .filter((filename) => filename.endsWith('.js') || filename.endsWith('.css'))
+      .map((filename) => `/assets/${filename}`);
+    const assetPaths = [...new Set([...referencedAssetPaths, ...builtAssetPaths])];
     const jsPaths = assetPaths.filter((path) => path.endsWith('.js'));
     const cssPaths = assetPaths.filter((path) => path.endsWith('.css'));
     if (jsPaths.length === 0 || cssPaths.length === 0) throw new SmokeFailure('ASSET_REFERENCE_MISSING');
 
-    for (const [kind, assetPath, expectedType] of [
-      ['js', jsPaths[0], 'javascript'],
-      ['css', cssPaths[0], 'text/css'],
-    ]) {
-      const assetResponse = await requestLocal(port, assetPath);
+    for (const assetPath of assetPaths) {
+      const kind = assetPath.endsWith('.js') ? 'js' : 'css';
+      const expectedType = kind === 'js' ? 'javascript' : 'text/css';
+      const assetResponse = await checkedRequest(port, assetPath, kind);
       const contentType = assetResponse.contentType.toLowerCase();
       const ok = assetResponse.status === 200 && contentType.includes(expectedType) && assetResponse.body.length > 0;
       log('asset_http', { kind, status: assetResponse.status, ok, bytes: Buffer.byteLength(assetResponse.body) });
       if (!ok) throw new SmokeFailure('ASSET_HTTP_FAILED');
     }
 
-    const qrResponse = await requestLocal(port, '/api/qr-profile');
+    const qrResponse = await checkedRequest(port, '/api/qr-profile', 'qr-route');
     log('qr_route', { method: 'GET', status: qrResponse.status, ok: qrResponse.status === 405 });
     if (qrResponse.status !== 405) throw new SmokeFailure('QR_ROUTE_FAILED');
 
-    const aiResponse = await requestLocal(port, '/api/production/universal-layout/v2/status');
+    const aiResponse = await checkedRequest(port, '/api/production/universal-layout/v2/status', 'ai-status');
     let aiBody;
     try {
       aiBody = JSON.parse(aiResponse.body);
@@ -367,7 +413,11 @@ async function main() {
     }
   } finally {
     const stopped = await stopChild();
-    log('cleanup', { childExited: stopped, exitCode: childExitCode });
+    log('cleanup', {
+      childExited: stopped,
+      exitCode: childExitCode,
+      terminationSignal: childSignal,
+    });
     if (!stopped && !failureCode) failureCode = 'CLEANUP_FAILED';
   }
 
