@@ -41,6 +41,6 @@ CIVIL_UNIVERSAL_LAYOUT_OPENAI_RELAY_ENABLED = "false"
 CIVIL_UNIVERSAL_LAYOUT_V2_LOCAL_FAKE_AUTO_ENABLED = "false"
 
 [deployment]
-deploymentTarget = "autoscale"
+deploymentTarget = "vm"
 run = ["node", "server/production-bootstrap.mjs"]
 build = ["npm", "run", "build"]
